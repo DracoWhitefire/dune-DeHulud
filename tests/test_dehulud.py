@@ -215,7 +215,7 @@ class Route(GameTest):
 
     def test_percent_is_floored_and_clamped(self):
         for blob, want, frac in (("29", 29, 0.29), ("99.99", 99, 0.9999), ("100", 100, 1.0), ("150", 100, 1.0),
-                                 ("1000", 100, 1.0)):
+                                 ("1000", 100, 1.0), ("0.5", 0, 0.005)):    # a small threat shows 0 % too
             self.game.cmd("f %s %s %s" % (COMP, BLOB, blob))
             r = self.poll()
             self.assertEqual(r.percent, want, blob)

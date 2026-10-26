@@ -238,9 +238,9 @@ def outside_launch_help(pid, scope):
     trade = ("Trade-off: with 0, every program running as your user can read the memory of your other programs "
              "(browser, password manager).")
     if scope == 3:
-        return head + ("3 cannot be lowered while the system runs: change kernel.yama.ptrace_scope to 0 in the file "
-                       "under /etc/sysctl.d/ that sets 3 (README, 'Change it permanently'), reboot, remove the launch option "
-                       "in Steam and start DeHulud by itself. " + trade)
+        return head + ("3 cannot be lowered while the system runs: change kernel.yama.ptrace_scope to 0 in the "
+                       "file under /etc/sysctl.d/ that sets 3 (README, 'Change it permanently'), reboot, remove "
+                       "the launch option in Steam and start DeHulud by itself. " + trade)
     why = ("With 2, only a program with the CAP_SYS_PTRACE capability (normally only root) may read another "
            "program, even one it started.\n" if scope == 2 else
            "With 1, a program may read only its own descendants (the programs it started, and theirs).\n")
@@ -277,10 +277,10 @@ class Meter:
 
     def _poll(self):
         self.reads = 0
+        if self.game is None and self.clock() < self.next_scan:
+            return self.last
         for _ in range(2):           # a second round only when the attached process now runs another image
             if self.game is None:
-                if self.clock() < self.next_scan:
-                    return self.last
                 self.next_scan = self.clock() + self.scan_interval
                 self.last = self._attach()
                 if self.game is None:
@@ -552,10 +552,10 @@ def local_display(name):
 
     Accepted: ':N', ':N.S', 'unix:N', 'unix:N.S' (and 'unix/:N[.S]'). Everything with a host part is refused
     ('192.0.2.1:12', 'localhost:10' as set by ssh X forwarding, 'host/unix:0'), as are socket paths: the window
-    must never open a network connection. The 'unix/' protocol prefix is what Xlib (libxcb) is handed, because
-    it is the one form that uses only the Unix socket of display N with every libxcb version: for a plain ':N'
-    libxcb falls back to TCP on localhost port 6000+N when that socket cannot be reached, and libxcb 1.16 and
-    later read 'unix:N' as the path of a socket file named 'N'."""
+    must never open a network connection. Xlib (libxcb) is handed the 'unix/' protocol form, with which it
+    uses only the Unix socket of display N: for a plain ':N' libxcb falls back to TCP on localhost port 6000+N
+    when that socket cannot be reached, and libxcb 1.16 and later read 'unix:N' as the path of a socket file
+    named 'N'."""
     m = re.fullmatch(r"(?:unix/?)?:([0-9]+)(\.[0-9]+)?", name or "")
     return "unix/:%s%s" % (m.group(1), m.group(2) or "") if m else None
 
@@ -623,9 +623,10 @@ class Window:
         self.tk, self.meter, self.path, self.should_stop = tk, meter, config_file, should_stop
         self.cfg, self.drag, self.after_id, self.said = load_config(config_file), None, None, None
         self.reading = Reading("waiting for game")
-        screen = local_display(os.environ.get("DISPLAY") if display is None else display)
+        name = os.environ.get("DISPLAY", "") if display is None else display
+        screen = local_display(name)
         if screen is None:
-            raise tk.TclError("not a display on this computer: %r" % display)
+            raise tk.TclError("not a display on this computer: %r" % name)
         root = self.root = tk.Tk(screenName=screen)
         root.title(APP)
         root.resizable(False, False)
@@ -801,7 +802,7 @@ def main(argv=None, meter_factory=Meter, config_file=None):
         tk, display = None, os.environ.get("DISPLAY", "")
         if not text and local_display(display) is None:      # decided before tkinter or Xlib is even loaded
             print("dehulud: %s, using text mode." % ("DISPLAY=%r is not a display on this computer (DeHulud opens "
-                  "no network connection)" % display if display else "no X display (DISPLAY is not set)"),
+                  "no network connection)" % display if display else "no X display (DISPLAY is empty or not set)"),
                   file=sys.stderr)
         elif not text:
             try:
