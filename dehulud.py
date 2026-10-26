@@ -817,9 +817,10 @@ def main(argv=None, meter_factory=Meter, config_file=None):
     if child is not None:
         while True:
             try:
-                return child.wait()
+                rc = child.wait()
             except KeyboardInterrupt:
                 continue
+            return 128 - rc if rc < 0 else rc      # killed by signal N: exit status 128 + N, as a shell reports it
     return 0
 
 

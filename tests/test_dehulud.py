@@ -391,6 +391,18 @@ class Launch(unittest.TestCase):
         rc, polls, out = self.run_main(["--text", "--launch", "/nonexistent/dune-game"])
         self.assertEqual(rc, 127)
 
+    def test_a_game_ended_by_a_signal_exits_with_128_plus_the_signal(self):
+        class Ended:                                    # Popen's view of a child killed by signal 15
+            def poll(self):
+                return -15
+
+            def wait(self):
+                return -15                              # (no kill/terminate/send_signal: none may be called)
+
+        with mock.patch.object(dehulud.subprocess, "Popen", return_value=Ended()):
+            rc, polls, out = self.run_main(["--text", "--launch", "not-run"])
+        self.assertEqual(rc, 128 + 15)
+
     def test_launched_reads_its_descendant(self):
         game = FakeGame()
         self.addCleanup(game.close)
