@@ -579,14 +579,14 @@ def monitors(display_name):
         return []
     try:
         x11, xrr = ctypes.CDLL("libX11.so.6"), ctypes.CDLL("libXrandr.so.2")
-    except OSError:
+        x11.XOpenDisplay.restype, x11.XOpenDisplay.argtypes = ctypes.c_void_p, [ctypes.c_char_p]
+        x11.XDefaultRootWindow.restype, x11.XDefaultRootWindow.argtypes = ctypes.c_ulong, [ctypes.c_void_p]
+        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        xrr.XRRGetMonitors.restype = ctypes.POINTER(_MonitorInfo)
+        xrr.XRRGetMonitors.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+        xrr.XRRFreeMonitors.argtypes = [ctypes.POINTER(_MonitorInfo)]
+    except (OSError, AttributeError):        # no library, or a libXrandr older than 1.5 (no monitor list)
         return []
-    x11.XOpenDisplay.restype, x11.XOpenDisplay.argtypes = ctypes.c_void_p, [ctypes.c_char_p]
-    x11.XDefaultRootWindow.restype, x11.XDefaultRootWindow.argtypes = ctypes.c_ulong, [ctypes.c_void_p]
-    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-    xrr.XRRGetMonitors.restype = ctypes.POINTER(_MonitorInfo)
-    xrr.XRRGetMonitors.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
-    xrr.XRRFreeMonitors.argtypes = [ctypes.POINTER(_MonitorInfo)]
     dpy = x11.XOpenDisplay(display_name.encode())
     if not dpy:
         return []

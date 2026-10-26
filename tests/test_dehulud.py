@@ -808,6 +808,19 @@ class Placement(unittest.TestCase):
     def test_monitors_without_a_display_is_empty_not_an_error(self):
         self.assertEqual(dehulud.monitors(":987654"), [])
 
+    def test_monitors_with_a_libxrandr_older_than_1_5_is_empty_not_an_error(self):
+        # libXrandr loads but has no XRRGetMonitors: the window falls back to the screen size instead of failing
+        real = dehulud.ctypes.CDLL
+
+        class OldXrandr:
+            pass
+
+        def cdll(name, *args, **kwargs):
+            return OldXrandr() if "Xrandr" in str(name) else real(name, *args, **kwargs)
+
+        with mock.patch.object(dehulud.ctypes, "CDLL", side_effect=cdll):
+            self.assertEqual(dehulud.monitors(":0"), [])
+
 
 class SourceSafety(unittest.TestCase):
     """Source lint: no write/attach/signal/inject/network call or network module anywhere in the product file's
