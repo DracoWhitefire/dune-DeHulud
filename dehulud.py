@@ -289,9 +289,13 @@ class Meter:
         return self.last
 
     def _descends(self, pid):
-        me = os.getpid()
+        """Whether pid descends from DeHulud. Only the user's own processes are read: the walk stops at the first
+        ancestor that belongs to another user, before its status is opened."""
+        me, uid = os.getpid(), os.getuid()
         for _ in range(64):
             try:
+                if self.source.uid(pid) != uid:
+                    return False
                 pid = self.source.ppid(pid)
             except (OSError, ValueError):
                 return False

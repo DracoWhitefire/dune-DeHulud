@@ -470,6 +470,36 @@ class LaunchScopes(unittest.TestCase):
         self.assertEqual(meter.poll().percent, 42)
 
 
+class Ancestry(unittest.TestCase):
+    """Finding out whether the game descends from DeHulud only ever reads the user's own processes."""
+
+    def source(self, foreign):
+        me, uid = os.getpid(), os.getuid()
+
+        class Source:                                   # made-up pids: no real process is looked at
+            statuses, uids = [], []
+
+            def uid(self, pid):
+                self.uids.append(pid)
+                return uid + 1 if pid in foreign else uid
+
+            def ppid(self, pid):
+                self.statuses.append(pid)
+                return {900000001: 900000002, 900000002: me}[pid]
+        return Source()
+
+    def test_the_walk_stops_before_another_users_process(self):
+        src = self.source(foreign={900000002})
+        self.assertFalse(dehulud.Meter(source=src, launched=True)._descends(900000001))
+        self.assertEqual(src.statuses, [900000001])      # the other user's process was never read
+        self.assertIn(900000002, src.uids)
+
+    def test_own_ancestors_reach_dehulud(self):
+        src = self.source(foreign=set())
+        self.assertTrue(dehulud.Meter(source=src, launched=True)._descends(900000001))
+        self.assertEqual(src.statuses, [900000001, 900000002])
+
+
 class Text(unittest.TestCase):
     def test_format_line(self):
         self.assertEqual(dehulud.format_line(dehulud.Reading("on foot", 42, 0.425)),
