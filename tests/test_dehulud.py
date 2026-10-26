@@ -408,6 +408,68 @@ class Launch(unittest.TestCase):
         self.assertEqual(meter.reads, 0)                # nothing was read from it
 
 
+class LaunchScopes(unittest.TestCase):
+    """--launch mode: every ptrace_scope value x the game being a descendant of DeHulud or not."""
+
+    def setUp(self):
+        self.game = FakeGame()
+        self.addCleanup(self.game.close)
+
+    def poll(self, scope, descendant):
+        meter = dehulud.Meter(source=FakeSource(self.game, scope=scope, ppid=None if descendant else 1),
+                              launched=True, scan_interval=0)
+        return meter.poll(), meter
+
+    def test_a_descendant_is_read_at_every_scope(self):
+        for scope in (0, 1, 2, 3, None):
+            r, meter = self.poll(scope, True)
+            self.assertEqual((r.status, r.percent), ("on foot", 42), scope)
+            self.assertEqual(r.detail, "", scope)
+
+    def test_outside_launch_with_scope_0_is_read_anyway(self):
+        for scope in (0, None):                         # 0, or no readable setting: the kernel may allow it
+            r, meter = self.poll(scope, False)
+            self.assertEqual((r.status, r.percent), ("on foot", 42), scope)
+            self.assertIn("found the game outside --launch; reading it anyway", r.detail)
+            self.assertIn(str(self.game.pid), r.detail)
+            self.assertEqual(meter.poll().percent, 42)
+
+    def refused(self, scope):
+        r, meter = self.poll(scope, False)
+        self.assertEqual((r.status, r.percent), ("not started by --launch", None), scope)
+        self.assertEqual(meter.reads, 0)                # nothing was read from it
+        self.assertIn(str(self.game.pid), r.detail)
+        self.assertIn("Steam started the game outside DeHulud", r.detail)
+        self.assertNotIn("%command%", r.detail)         # the launch option is what does not work here
+        return r.detail
+
+    def test_outside_launch_with_scope_1(self):
+        text = self.refused(1)
+        self.assertIn("sudo sysctl kernel.yama.ptrace_scope=0", text)
+        self.assertIn("remove the launch option", text)
+        self.assertIn(shlex.quote(os.path.realpath(SOURCE_FILE)), text)
+        self.assertIn("Trade-off", text)
+
+    def test_outside_launch_with_scope_2(self):
+        text = self.refused(2)
+        self.assertIn("CAP_SYS_PTRACE", text)
+        self.assertIn("sudo sysctl kernel.yama.ptrace_scope=0", text)
+        self.assertIn("Trade-off", text)
+
+    def test_outside_launch_with_scope_3(self):
+        text = self.refused(3)
+        self.assertIn("reboot", text)
+        self.assertIn("cannot be lowered", text)
+        self.assertNotIn("sudo sysctl kernel.yama.ptrace_scope=", text)   # no runtime change is possible
+
+    def test_lowering_the_scope_to_0_lets_the_running_meter_read_it(self):
+        source = FakeSource(self.game, scope=1, ppid=1)
+        meter = dehulud.Meter(source=source, launched=True, scan_interval=0)
+        self.assertEqual(meter.poll().status, "not started by --launch")
+        source.scope = 0
+        self.assertEqual(meter.poll().percent, 42)
+
+
 class Text(unittest.TestCase):
     def test_format_line(self):
         self.assertEqual(dehulud.format_line(dehulud.Reading("on foot", 42, 0.425)),

@@ -30,9 +30,11 @@
 > words and the game would not start. Running `./dehulud.py --launch` once in the file's folder prints
 > this exact line with your path, already quoted (that also works for a path that contains a `'`). Make
 > the file executable once: `chmod +x dehulud.py`. Steam then starts the game as a child of DeHulud,
-> which `1` allows; DeHulud closes when the game exits. **This mode is not
-> yet confirmed with the Steam Linux Runtime container**: if Steam turns out to start the game outside
-> DeHulud, the window says `not started by --launch` and tells you to use the change below instead.
+> which `1` allows; DeHulud closes when the game exits. **This mode is not yet confirmed with the Steam
+> Linux Runtime container**: if Steam turns out to start the game outside DeHulud, the launch option cannot
+> work. The window then says `not started by --launch`, and right-click > *Help / details* says what does
+> for your setting: with `1` or `2`, switch to `0` (below) and start DeHulud by itself, without the launch
+> option; with `3`, the same after a reboot. With `0` a `--launch` DeHulud reads such a game anyway.
 >
 > **Change the setting until the next reboot:**
 >
@@ -86,7 +88,7 @@ on foot
 | `no data` | a type check failed or memory moved during the read; usually only during loading, or for a moment when the controlled pawn changes (getting on or off a vehicle) |
 | `Unsupported game version` | a game build DeHulud does not know; the bar area shows its PE timestamp |
 | `no permission` | see the box at the top; right-click > *Help / details* shows the exact fix for your setting |
-| `not started by --launch` | launch-option mode, but Steam started the game outside DeHulud |
+| `not started by --launch` | launch-option mode, but Steam started the game outside DeHulud and your ptrace setting (`1` to `3`) does not allow reading it; *Help / details* says what works |
 
 Not yet confirmed in a live game: whether the two values are kept up to date on your PC (the server
 replicates them) and whether the percent matches the game's own threat indicator. The game's own widget

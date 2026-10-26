@@ -223,9 +223,26 @@ def permission_help(scope, launched):
     return head + fix + "\nDetails: README.md, 'Before you start: permission to read the game'."
 
 
-NOT_CHILD = ("The game (pid %d) was not started through this --launch wrapper, so ptrace_scope 1 does not let "
-             "DeHulud read it. Steam probably starts the game outside the wrapper (container/sandbox). "
-             "Use instead (until reboot):\n  sudo sysctl kernel.yama.ptrace_scope=0")
+def outside_launch_help(pid, scope):
+    """--launch mode, but the game is not a descendant of DeHulud: what works for this ptrace_scope value."""
+    head = ("Steam started the game outside DeHulud (pid %d is not a descendant of this --launch DeHulud), so the "
+            "launch option cannot help, and ptrace_scope is %s.\n" % (pid, scope))
+    trade = ("Trade-off: with 0, every program running as your user can read the memory of your other programs "
+             "(browser, password manager).")
+    if scope == 3:
+        return head + ("3 cannot be lowered while the system runs: change kernel.yama.ptrace_scope to 0 in the file "
+                       "under /etc/sysctl.d/ that sets 3 (README, 'Change it permanently'), reboot, remove the launch option "
+                       "in Steam and start DeHulud by itself. " + trade)
+    why = ("With 2, only a program with the CAP_SYS_PTRACE capability (normally only root) may read another "
+           "program, even one it started.\n" if scope == 2 else
+           "With 1, a program may read only its own descendants (the programs it started, and theirs).\n")
+    return head + why + ("What works: allow reading with\n"
+                         "  sudo sysctl kernel.yama.ptrace_scope=0      (until the next reboot)\n"
+                         "then remove the launch option in Steam and start DeHulud by itself:  %s\n%s"
+                         % (shlex.quote(os.path.realpath(__file__)), trade))
+
+
+OUTSIDE = "DeHulud found the game outside --launch; reading it anyway (pid %d, ptrace_scope %s)."
 UNSUPPORTED = ("Unsupported game version: PE timestamp %d (%s UTC), SizeOfImage %d.\nThis DeHulud knows: %s.\n"
                "After a game update DeHulud shows '-' until a release with the new build's offsets exists.")
 
@@ -243,9 +260,14 @@ class Meter:
         self.scan_interval, self.clock = scan_interval, clock
         self.game = None        # [pid, image base, build entry, reader, class slot values or None,
                                 #  PE identity, header bytes re-read each poll]
+        self.note = ""          # said with every reading of this attachment (a game found outside --launch)
         self.next_scan, self.reads, self.last = 0.0, 0, Reading("waiting for game")
 
     def poll(self):
+        r = self._poll()
+        return r._replace(detail=self.note) if self.note and self.game is not None and not r.detail else r
+
+    def _poll(self):
         self.reads = 0
         for _ in range(2):           # a second round only when the attached process now runs another image
             if self.game is None:
@@ -289,12 +311,20 @@ class Meter:
             except (OSError, ValueError):
                 continue
             if hit and self.launched and not self._descends(pid):
-                foreign.append(pid)
+                foreign.append((pid, hit[0]))
             elif hit:
                 found.append((pid, hit[0]))
+        self.note = ""
+        if not found and foreign:
+            # Steam started the game outside this --launch DeHulud. With ptrace_scope 0 the kernel allows the
+            # read anyway (so it is tried; without a readable setting too: a refusal then says why). With 1-3 a
+            # read would be refused, so nothing is read and the message says what works for that value.
+            scope = src.ptrace_scope()
+            if scope not in (0, None):
+                return Reading("not started by --launch", detail=outside_launch_help(foreign[0][0], scope),
+                               hint=MENU_HINT)
+            found, self.note = foreign, OUTSIDE % (foreign[0][0], "0" if scope == 0 else "not readable")
         if not found:
-            if foreign:
-                return Reading("not started by --launch", detail=NOT_CHILD % foreign[0], hint=MENU_HINT)
             return Reading("waiting for game")
         pid, base = found[0]
         reader = self.reader_factory(pid)
