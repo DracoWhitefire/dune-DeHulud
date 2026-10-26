@@ -27,10 +27,10 @@
 >
 > with the real path of the file, inside the single quotes: Steam runs this line as a shell command, so
 > a path with a space in it (a folder named `My Games`, for example) would otherwise be split into two
-> words and the game would not start. Running `./dehulud.py --launch` once in the file's folder prints
-> this exact line with your path, already quoted (that also works for a path that contains a `'`). Make
-> the file executable once: `chmod +x dehulud.py`. Steam then starts the game as a child of DeHulud,
-> which `1` allows; DeHulud closes when the game exits. **This mode is not yet confirmed with the Steam
+> words and the game would not start. Make the file executable once (`chmod +x dehulud.py` in its
+> folder); then `./dehulud.py --launch` there prints this exact line with your path, already quoted (that
+> also works for a path that contains a `'`). Steam then starts the game as a child of DeHulud, which `1`
+> allows; DeHulud closes when the game exits. **This mode is not yet confirmed with the Steam
 > Linux Runtime container**: if Steam turns out to start the game outside DeHulud, the launch option cannot
 > work. The window then says `not started by --launch`, and right-click > *Help / details* says what does
 > for your setting: with `1` or `2`, switch to `0` (below) and start DeHulud by itself, without the launch
@@ -46,7 +46,7 @@
 > `grep -rs ptrace_scope /etc/sysctl.d /run/sysctl.d /usr/lib/sysctl.d /usr/local/lib/sysctl.d /etc/sysctl.conf`.
 >
 > - If a file under `/etc/` sets it: **write down the old value**, change that line to `0`, then run
->   `sudo sysctl --system`.
+>   `sudo sysctl --system` (or reboot, if the old value was `3`).
 > - Otherwise (nothing sets it, or only a packaged file under `/usr/lib/`, `/usr/local/lib/` or `/run/`):
 >   add a file of your own. Of several files that set the same value, the one whose name sorts last wins,
 >   so this file overrides the packaged one without touching it or its other settings:
@@ -57,8 +57,9 @@
 >   cat /proc/sys/kernel/yama/ptrace_scope
 >   ```
 >
->   The last line should print `0`. Do not create a file with the *same name* as a packaged one: it
->   replaces the packaged file completely, with all of its other settings.
+>   The last line should print `0` (with `3` it cannot change before a reboot). Do not create a file with
+>   the *same name* as a packaged one: it replaces the packaged file completely, with all of its other
+>   settings.
 >
 > **Trade-off:** with `0`, any program running as your user can read the memory of your other programs
 > (browser, password manager), which is exactly what `1` to `3` prevent, so prefer the launch option.
@@ -152,9 +153,8 @@ config file is ignored.
 
 **Placement:** the first time, it opens at the top-right of your main screen (with several screens it
 picks a real screen when the display reports its monitors through XRandR); *Reset position* puts it back
-there. It is meant to stay above games in
-*windowed* or *borderless windowed* mode and works on a second screen. In *exclusive fullscreen* the game
-may cover it. On Wayland desktops the window runs through XWayland and staying on top is up to your
+there. It is meant to stay above games in *windowed* or *borderless windowed* mode and works on a second
+screen. In *exclusive fullscreen* the game may cover it. On Wayland desktops the window runs through XWayland and staying on top is up to your
 compositor: checked on KDE Plasma (Wayland) over the running game in fullscreen, with three screens.
 
 ## Per-distribution notes
@@ -265,8 +265,7 @@ owner selection (a pawn that fails its check is `-`), the same process exec'ing 
 `LocalPlayers` empty, every type check, invalid values, permission errors for each `ptrace_scope` value
 (simulated), `--launch` for each value with and without the game descending from DeHulud, the game exiting
 during a poll, the local-display check, quoting of printed commands, config handling and text mode. The
-GUI test builds
-the real window only on a private headless compositor (`kwin_wayland --virtual --xwayland` under its own
+GUI test builds the real window only on a private headless compositor (`kwin_wayland --virtual --xwayland` under its own
 D-Bus session and runtime directory) and is skipped when that or tkinter is missing; it never uses your
 desktop's display. Checked live once, on one PC: KDE Plasma (Wayland), native Steam, the game in
 fullscreen. Not tested: `--launch` under the real Steam Linux Runtime, Flatpak Steam, other desktops and
