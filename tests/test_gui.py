@@ -54,6 +54,7 @@ class Gui(unittest.TestCase):
             r = json.load(f)
         self.assertNotIn("refused", r)
         self.assertEqual(r["title"], "DeHulud")
+        self.assertTrue(r["screen"].startswith("unix/:"), r["screen"])  # Tk got the Unix-socket-only name
         self.assertEqual(r["topmost"], 1)
         self.assertTrue(r["frameless"])
         self.assertEqual(r["size"], [180, 44])

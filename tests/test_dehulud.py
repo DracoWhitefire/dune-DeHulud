@@ -414,7 +414,8 @@ class Text(unittest.TestCase):
         meter = self.scripted([dehulud.Reading("on foot", 42, 0.425)])
         with mock.patch.object(dehulud, "_import_tk", side_effect=ImportError("no tkinter")), \
                 mock.patch("sys.stdout", out), mock.patch("sys.stderr", err), \
-                mock.patch.object(dehulud, "tk_install_hint", return_value="HINT"):
+                mock.patch.object(dehulud, "tk_install_hint", return_value="HINT"), \
+                mock.patch.dict(os.environ, {"DISPLAY": ":0"}):   # a local display: tkinter is wanted
             self.assertEqual(dehulud.main([], meter_factory=lambda launched: meter), 0)
         self.assertIn("42%", out.getvalue())
         self.assertIn("HINT", err.getvalue())
@@ -424,18 +425,19 @@ class Text(unittest.TestCase):
             class TclError(Exception):
                 pass
 
-            def Tk(self):
-                raise self.TclError("no display name and no $DISPLAY environment variable")
+            def Tk(self, screenName=None):
+                raise self.TclError("couldn't connect to display \"%s\"" % screenName)
 
         out, err = io.StringIO(), io.StringIO()
         meter = self.scripted([dehulud.Reading("vehicle", 80, 0.8)])
         with mock.patch.object(dehulud, "_import_tk", return_value=FakeTk()), \
-                mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+                mock.patch("sys.stdout", out), mock.patch("sys.stderr", err), \
+                mock.patch.dict(os.environ, {"DISPLAY": ":0"}):
             rc = dehulud.main([], meter_factory=lambda launched: meter,
                               config_file=os.path.join(tempfile.mkdtemp(), "c.json"))
         self.assertEqual(rc, 0)
         self.assertIn(" 80% ", out.getvalue())
-        self.assertIn("no display", err.getvalue())
+        self.assertIn("no window possible", err.getvalue())
 
     def test_tk_install_hints(self):
         cases = {'ID=ubuntu\nID_LIKE=debian': "apt install python3-tk",
@@ -451,6 +453,99 @@ class Text(unittest.TestCase):
                  '': "tkinter"}
         for text, want in cases.items():
             self.assertIn(want, dehulud.tk_install_hint(text), text)
+
+
+class Display(unittest.TestCase):
+    """The window only uses an X display on this computer, through its Unix socket: no network connection."""
+    LOCAL = {":0": "unix/:0", ":1": "unix/:1", ":12.1": "unix/:12.1", "unix:0": "unix/:0", "unix:3.2": "unix/:3.2",
+             "unix/:2": "unix/:2", "unix/:2.0": "unix/:2.0"}
+    REMOTE = ("192.0.2.1:12", "localhost:10", "localhost:0", "host:0", "[::1]:0", "::1:0", "tcp/:0", "inet/:0",
+              "host/unix:0", "unix/host:0", "/tmp/.X11-unix/X0", ":", ":x", ":0.", ":0.0.0", " :0", ":0 ", ":0\n",
+              "wayland-0", "", None)
+
+    def test_local_display_names(self):
+        for name, want in self.LOCAL.items():
+            self.assertEqual(dehulud.local_display(name), want, name)
+        for name in self.REMOTE:
+            self.assertIsNone(dehulud.local_display(name), name)
+
+    def scripted(self):
+        class M:
+            n = 0
+
+            def poll(self):
+                self.n += 1
+                if self.n > 1:
+                    raise KeyboardInterrupt
+                return dehulud.Reading("on foot", 42, 0.425)
+        return M()
+
+    def test_display_elsewhere_falls_back_to_text_before_tk_is_loaded(self):
+        for display in ("192.0.2.1:12", "localhost:10", "host/unix:0", "", None):
+            loaded = []
+
+            class FakeTk:
+                class TclError(Exception):
+                    pass
+
+                def Tk(self, screenName=None):
+                    loaded.append(screenName)
+                    raise self.TclError("stop")
+
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.dict(os.environ), mock.patch("sys.stdout", out), mock.patch("sys.stderr", err), \
+                    mock.patch.object(dehulud, "_import_tk", side_effect=lambda: loaded.append("tk") or FakeTk()), \
+                    mock.patch.object(dehulud, "POLL_MS", 1):
+                os.environ.pop("DISPLAY", None)
+                if display is not None:
+                    os.environ["DISPLAY"] = display
+                rc = dehulud.main([], meter_factory=lambda launched: self.scripted(),
+                                  config_file=os.path.join(tempfile.mkdtemp(), "c.json"))
+            self.assertEqual(rc, 0, display)
+            self.assertEqual(loaded, [], display)             # tkinter was not even imported
+            self.assertIn(" 42% ", out.getvalue(), display)
+            lines = err.getvalue().splitlines()
+            self.assertEqual(len(lines), 1, lines)            # one line saying why
+            self.assertIn("text mode", lines[0])
+            if display:
+                self.assertIn(display, lines[0])
+
+    def test_window_asks_tk_only_for_the_unix_socket(self):
+        asked = []
+
+        class FakeTk:
+            class TclError(Exception):
+                pass
+
+            def Tk(self, screenName=None):
+                asked.append(screenName)
+                raise self.TclError("stop")
+
+        cfg = os.path.join(tempfile.mkdtemp(), "c.json")
+        for display, want in ((":7", ["unix/:7"]), ("unix:7.1", ["unix/:7.1"]), ("192.0.2.1:12", []),
+                              ("localhost:10", [])):
+            del asked[:]
+            with mock.patch.dict(os.environ, {"DISPLAY": display}), self.assertRaises(FakeTk.TclError):
+                dehulud.Window(FakeTk(), self.scripted(), cfg)
+            self.assertEqual(asked, want, display)
+
+    def test_monitors_open_only_a_local_display(self):
+        opened = []
+
+        def fake_library(name):
+            def open_display(n):
+                opened.append(n)
+                return None
+            lib = mock.NonCallableMock()
+            lib.XOpenDisplay = open_display
+            return lib
+
+        with mock.patch.object(dehulud.ctypes, "CDLL", fake_library):
+            for name in ("192.0.2.1:12", "localhost:10", "", None):
+                self.assertEqual(dehulud.monitors(name), [], name)
+            self.assertEqual(opened, [])                      # nothing was opened for them
+            self.assertEqual(dehulud.monitors(":5"), [])
+        self.assertEqual(opened, [b"unix/:5"])
 
 
 class Config(unittest.TestCase):

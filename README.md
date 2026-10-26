@@ -161,6 +161,11 @@ sandbox may block the read). The native (non-Flatpak) Steam package is the teste
   debugger (no ptrace attach), never sends signals, injects nothing, simulates no input, and opens no
   network connection of any kind (no update check, no telemetry). `--launch` only starts Steam's command
   as a normal child process and waits for it.
+- The window only uses an X display on this computer: `DISPLAY` must be `:N` or `unix:N` (optionally with a
+  screen, `:N.S`). A display on another machine (`host:N`, or `localhost:N` as set by `ssh -X`) is refused
+  before anything graphical is loaded, and DeHulud runs as the text meter with a one-line explanation. It
+  hands Tk the display as `unix/:N`, the form with which Xlib uses only the display's Unix socket: with a
+  plain `:N` Xlib falls back to a TCP connection on `localhost` when that socket cannot be reached.
 - The test suite enforces this: it fails if `dehulud.py` contains a memory-write, debugger, signal,
   process-kill or network call, or imports a network module.
 

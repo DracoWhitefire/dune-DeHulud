@@ -33,7 +33,7 @@ def main(result_path, before):
     cfg_path = os.path.join(os.environ["XDG_CONFIG_HOME"], "dehulud", "config.json")
     w = dehulud.Window(tkinter, Meter(), cfg_path)
     w.root.update()
-    out = {"title": w.root.title(), "topmost": int(w.root.attributes("-topmost")),
+    out = {"title": w.root.title(), "screen": w.root.winfo_screen(), "topmost": int(w.root.attributes("-topmost")),
            "frameless": bool(w.root.overrideredirect()), "size": [w.root.winfo_width(), w.root.winfo_height()],
            "shown": []}
     for _ in range(4):

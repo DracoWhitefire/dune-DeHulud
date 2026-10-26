@@ -4,14 +4,15 @@
 Shows how close you are to the sandworm attack threshold, as a percent and a bar, in a tiny
 always-on-top window (or one terminal line). It finds the running game (Proton) by itself.
 
-  dehulud.py                    window (falls back to text if tkinter or a display is missing)
+  dehulud.py                    window (falls back to text without tkinter or a local X display)
   dehulud.py --text             one-line meter in the terminal
   dehulud.py --launch %command% Steam launch options: starts the game as a child of DeHulud, so a
                                 ptrace_scope of 1 allows the read without changing the system
 
 Read-only: it reads /proc/<pid>/{cmdline,maps,status} of your own processes and the game's memory
 with process_vm_readv, nothing else. It never writes to the game, never attaches a debugger, never
-signals or injects anything, sends no input and opens no network connection.
+signals or injects anything, sends no input and opens no network connection (the window only opens a
+local X display, through its Unix socket).
 Python 3.9+, standard library only.
 """
 import collections
@@ -20,6 +21,7 @@ import errno
 import json
 import math
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -497,6 +499,19 @@ def save_config(path, cfg):
         return False
 
 
+def local_display(name):
+    """The X display `name` as 'unix/:N[.S]' when it is a display on this computer, else None.
+
+    Accepted: ':N', ':N.S', 'unix:N', 'unix:N.S' (and 'unix/:N[.S]'). Everything with a host part is refused
+    ('192.0.2.1:12', 'localhost:10' as set by ssh X forwarding, 'host/unix:0'), as are socket paths: the window
+    must never open a network connection. The 'unix/' protocol prefix is what Xlib (libxcb) is handed, because
+    it is the one form that uses only the Unix socket of display N with every libxcb version: for a plain ':N'
+    libxcb falls back to TCP on localhost port 6000+N when that socket cannot be reached, and libxcb 1.16 and
+    later read 'unix:N' as the path of a socket file named 'N'."""
+    m = re.fullmatch(r"(?:unix/?)?:([0-9]+)(\.[0-9]+)?", name or "")
+    return "unix/:%s%s" % (m.group(1), m.group(2) or "") if m else None
+
+
 class _MonitorInfo(ctypes.Structure):
     """XRRMonitorInfo (Xrandr 1.5)."""
     _fields_ = [("name", ctypes.c_ulong), ("primary", ctypes.c_int), ("automatic", ctypes.c_int),
@@ -505,11 +520,15 @@ class _MonitorInfo(ctypes.Structure):
                 ("outputs", ctypes.c_void_p)]
 
 
-def monitors(display_name=None):
-    """The X screen's monitors as [(x, y, width, height, primary)], or [] when XRandR is unavailable.
+def monitors(display_name):
+    """The X screen's monitors as [(x, y, width, height, primary)], or [] when XRandR is unavailable or the
+    display is not a local one (see local_display).
 
     The X screen of a multi-monitor desktop is the bounding box of all monitors, so a corner of it can lie on
     no monitor at all; the window is placed on a real monitor instead."""
+    display_name = local_display(display_name)
+    if display_name is None:
+        return []
     try:
         x11, xrr = ctypes.CDLL("libX11.so.6"), ctypes.CDLL("libXrandr.so.2")
     except OSError:
@@ -520,7 +539,7 @@ def monitors(display_name=None):
     xrr.XRRGetMonitors.restype = ctypes.POINTER(_MonitorInfo)
     xrr.XRRGetMonitors.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
     xrr.XRRFreeMonitors.argtypes = [ctypes.POINTER(_MonitorInfo)]
-    dpy = x11.XOpenDisplay(display_name.encode() if display_name else None)
+    dpy = x11.XOpenDisplay(display_name.encode())
     if not dpy:
         return []
     try:
@@ -551,11 +570,15 @@ class Window:
     """180 x 44 always-on-top window: drag to move, right-click for the menu."""
     W, H, BAR = 180, 44, (44, 6, 130, 18)
 
-    def __init__(self, tk, meter, config_file, should_stop=lambda: False):
+    def __init__(self, tk, meter, config_file, should_stop=lambda: False, display=None):
+        """`display` defaults to $DISPLAY; only a local display is opened (see local_display)."""
         self.tk, self.meter, self.path, self.should_stop = tk, meter, config_file, should_stop
         self.cfg, self.drag, self.after_id, self.said = load_config(config_file), None, None, None
         self.reading = Reading("waiting for game")
-        root = self.root = tk.Tk()
+        screen = local_display(os.environ.get("DISPLAY") if display is None else display)
+        if screen is None:
+            raise tk.TclError("not a display on this computer: %r" % display)
+        root = self.root = tk.Tk(screenName=screen)
         root.title(APP)
         root.resizable(False, False)
         c = self.canvas = tk.Canvas(root, width=self.W, height=self.H, bg="#1d1f21", highlightthickness=0)
@@ -728,8 +751,12 @@ def main(argv=None, meter_factory=Meter, config_file=None):
     stop = (lambda: child.poll() is not None) if child else (lambda: False)
     try:
         meter = meter_factory(launched=child is not None)
-        tk = None
-        if not text:
+        tk, display = None, os.environ.get("DISPLAY", "")
+        if not text and local_display(display) is None:      # decided before tkinter or Xlib is even loaded
+            print("dehulud: %s, using text mode." % ("DISPLAY=%r is not a display on this computer (DeHulud opens "
+                  "no network connection)" % display if display else "no X display (DISPLAY is not set)"),
+                  file=sys.stderr)
+        elif not text:
             try:
                 tk = _import_tk()
             except ImportError:
@@ -737,7 +764,7 @@ def main(argv=None, meter_factory=Meter, config_file=None):
         window = None
         if tk is not None:
             try:
-                window = Window(tk, meter, config_file or config_path(), stop)
+                window = Window(tk, meter, config_file or config_path(), stop, display)
             except tk.TclError as e:
                 print("dehulud: no window possible (%s), using text mode." % e, file=sys.stderr)
         if window is not None:
