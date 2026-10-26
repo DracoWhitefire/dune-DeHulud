@@ -301,6 +301,18 @@ class Permission(GameTest):
         texts = {s: dehulud.permission_help(s, False) for s in (0, 1, 2, 3, None)}
         self.assertEqual(len(set(texts.values())), 5)
 
+    def test_help_texts_describe_yama_exactly(self):
+        texts = {s: dehulud.permission_help(s, False) for s in (0, 1, 2, 3, None)}
+        self.assertIn("normal rules still apply", texts[0])      # 0 adds nothing of its own; same user etc.
+        for t in (texts[1], dehulud.permission_help(1, True)):
+            self.assertIn("descendants", t)                     # not only the direct parent
+            self.assertNotIn("parent", t)
+        self.assertIn("CAP_SYS_PTRACE", texts[2])               # not literally root
+        self.assertNotIn("Only root", texts[2])
+        self.assertIn("cannot be lowered while the system runs", texts[3])
+        self.assertIn("could not be read", texts[None])         # a missing file does not prove there is no Yama
+        self.assertNotIn("There is no Yama", texts[None])
+
 
 class Quoting(unittest.TestCase):
     """Every command DeHulud prints for pasting quotes its own path, which may contain spaces or quotes."""

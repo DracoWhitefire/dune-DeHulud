@@ -12,11 +12,11 @@
 >
 > | value | meaning | what to do |
 > |---|---|---|
-> | `0` | any program may read your other programs | nothing, DeHulud works as is |
-> | `1` | only a program's parent may read it | **recommended:** start the game through DeHulud (Steam launch option, below), or switch to `0` |
-> | `2` | only root may read other programs | lower it to `1` (then use the launch option) or to `0` |
-> | `3` | nobody may, and it cannot be lowered until a reboot | change the file that sets it (below), then reboot |
-> | file missing | your kernel has no Yama module | nothing to change here; another sandbox or security module may still block it |
+> | `0` | no extra restriction: a program may read your other programs under the normal rules (same user, the game not sandboxed or made unreadable, no security module refusing) | nothing, DeHulud should work as is |
+> | `1` | a program may read only its own descendants (the programs it started, and theirs) | **recommended:** start the game through DeHulud (Steam launch option, below), or switch to `0` |
+> | `2` | only programs with the `CAP_SYS_PTRACE` capability (normally only root) may read other programs | lower it to `1` (then use the launch option) or to `0` |
+> | `3` | no program may, and the value cannot be lowered until a reboot | change the file that sets it (below), then reboot |
+> | file missing | the Yama module is not active, or the setting is hidden (for example inside a container); a missing file does not prove that nothing restricts the read | nothing to change here; another sandbox or security module may still block it |
 >
 > **Steam launch option (recommended for `1`)** - no system change needed. In Steam: right-click
 > Dune: Awakening > Properties > General > Launch Options, and enter

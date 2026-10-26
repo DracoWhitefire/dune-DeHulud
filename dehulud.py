@@ -7,7 +7,7 @@ always-on-top window (or one terminal line). It finds the running game (Proton) 
   dehulud.py                    window (falls back to text without tkinter or a local X display)
   dehulud.py --text             one-line meter in the terminal
   dehulud.py --launch %command% Steam launch options: starts the game as a child of DeHulud, so a
-                                ptrace_scope of 1 allows the read without changing the system
+                                ptrace_scope of 1 (descendants only) allows the read without a system change
 
 Read-only: it reads /proc/<pid>/{cmdline,maps,status} of your own processes and the game's memory
 with process_vm_readv, nothing else. It never writes to the game, never attaches a debugger, never
@@ -195,31 +195,39 @@ def launch_option():
 
 
 def permission_help(scope, launched):
-    """The exact fix for the user's ptrace_scope value (kernel.yama.ptrace_scope)."""
+    """The exact fix for the user's ptrace_scope value (kernel.yama.ptrace_scope). Yama's values: 0 adds no
+    restriction of its own (the normal same-user rules still apply), 1 allows a program to read only its own
+    descendants, 2 only programs with CAP_SYS_PTRACE, 3 nobody, and 3 cannot be lowered until a reboot."""
     head = "DeHulud was refused permission to read the game's memory (ptrace_scope is %s).\n" % (
-        "not present" if scope is None else scope)
+        "not readable" if scope is None else scope)
     if scope == 0:
-        fix = ("With ptrace_scope 0 this normally works. Check that the game runs as the same user as DeHulud and "
-               "is not in a sandbox (Flatpak Steam), and that no security module blocks it (SELinux: "
-               "'getsebool deny_ptrace' must be off).")
+        fix = ("ptrace_scope 0 adds no restriction of its own, but the normal rules still apply: the game must run as "
+               "the same user as DeHulud and not in a sandbox (Flatpak Steam), must not have made itself unreadable, "
+               "and no security module may block it (SELinux: 'getsebool deny_ptrace' must be off).")
     elif scope == 1 and launched:
-        fix = ("DeHulud started the game, but the game is still not readable: your Steam setup probably runs it "
-               "outside this --launch wrapper (container/sandbox). Use instead (until reboot):\n"
-               "  sudo sysctl kernel.yama.ptrace_scope=0")
+        fix = ("With 1 a program may read its own descendants, and DeHulud started the game through the --launch "
+               "wrapper, but it is still not readable: your Steam setup probably runs it in a container or sandbox "
+               "that prevents it. Use instead (until reboot):\n  sudo sysctl kernel.yama.ptrace_scope=0\n"
+               "and start DeHulud by itself, without the launch option.")
     elif scope == 1:
-        fix = ("Only a program's parent may read it. Fix, pick one:\n"
+        fix = ("With 1 a program may read only its own descendants (the programs it started, and theirs). "
+               "Fix, pick one:\n"
                "  1. Steam > Dune: Awakening > Properties > Launch Options:\n"
                "       %s\n"
-               "  2. Allow it until the next reboot:  sudo sysctl kernel.yama.ptrace_scope=0" % launch_option())
+               "  2. Allow it until the next reboot:  sudo sysctl kernel.yama.ptrace_scope=0\n"
+               "     (trade-off: then every program running as your user can read your other programs)"
+               % launch_option())
     elif scope == 2:
-        fix = ("Only root may read other programs. Lower it to 1 and use the Steam launch option (%s), or to 0:\n"
+        fix = ("With 2 only a program with the CAP_SYS_PTRACE capability (normally only root) may read another "
+               "program. Lower it to 1 and use the Steam launch option (%s), or to 0:\n"
                "  sudo sysctl kernel.yama.ptrace_scope=1" % launch_option())
     elif scope == 3:
-        fix = ("Reading other programs is switched off, and ptrace_scope 3 cannot be lowered until a reboot. "
+        fix = ("With 3 reading other programs is switched off, and 3 cannot be lowered while the system runs. "
                "Change kernel.yama.ptrace_scope in the file under /etc/sysctl.d/ that sets 3, then reboot.")
     else:
-        fix = ("There is no Yama ptrace_scope setting here, so something else blocks it: another user, a sandbox "
-               "(Flatpak) or a security module.")
+        fix = ("The Yama setting /proc/sys/kernel/yama/ptrace_scope could not be read: Yama is not active, or the "
+               "setting is hidden (a container). Something else refuses the read: another user, a sandbox (Flatpak) "
+               "or a security module (SELinux 'deny_ptrace', AppArmor).")
     return head + fix + "\nDetails: README.md, 'Before you start: permission to read the game'."
 
 
