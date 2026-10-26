@@ -1,14 +1,17 @@
 """Fake target for the DeHulud tests: a child process that lays out the threat route in its OWN memory.
 
-Run as: python3 fake_game.py DuneSandbox-Win64-Shipping.exe [--timestamp N]
+Run as: python3 fake_game.py DuneSandbox-Win64-Shipping.exe [--timestamp N] [--fixed]
 (the exe name is an argument only so that the real /proc/<pid>/cmdline of this child matches).
+--fixed maps the image and the object arena at fixed addresses, so that an exec keeps them where they were.
 
 It prints one JSON line {"base": <image address>, "obj": {name: address}} and then obeys stdin lines:
   f <obj> <offset> <value>   write a float32 at obj+offset (value may be nan / inf / -1)
   i <obj> <offset> <value>   write an int32
   p <obj> <offset> <target>  write a pointer to object <target> (or 0)
+  exec <timestamp>           exec a new fake game in this process (same pid; with --fixed also the same
+                             addresses) whose PE header has the given TimeDateStamp; it prints a new JSON line
   exit                       exit (status 0)
-Each command is answered with "ok". Only this process's own memory is ever written.
+Each other command is answered with "ok". Only this process's own memory is ever written.
 
 The constants below are typed in independently of dehulud.py (from the static analysis of build
 26083551), so a wrong offset in dehulud.py cannot be hidden by the fake following it.
@@ -16,6 +19,7 @@ The constants below are typed in independently of dehulud.py (from the static an
 import ctypes
 import json
 import mmap
+import os
 import struct
 import sys
 
@@ -35,14 +39,29 @@ WORLD_GI, GI_LP, LP_PC = 0x3C8, 0x38, 0x30          # OwningGameInstance, LocalP
 PC_PAWN, PC_ACK = 0x388, 0x3F0                      # Pawn, AcknowledgedPawn
 CHAR_COMP, VEH_COMP = 0xE88, 0xE08                  # m_SandwormThreatSourceComponent (character, vehicle)
 BLOB, THRESHOLD = 0x334, 0x348                      # m_CurrentThreatBlobValue, m_CurrentSandwormAttackThreshold
+FIXED_IMAGE, FIXED_ARENA = 0x3000000000, 0x4000000000  # --fixed addresses (far below the usual mmap area)
+
+
+def region(size, at=None):
+    """Anonymous read/write memory, lazily backed (only touched pages cost memory): (buffer, address)."""
+    if at is None:
+        m = mmap.mmap(-1, size)
+        return m, ctypes.addressof(ctypes.c_char.from_buffer(m))
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mmap.restype = ctypes.c_void_p
+    libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+    # PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE (never replaces a mapping)
+    got = libc.mmap(at, size, 0x3, 0x22 | 0x100000, -1, 0)
+    if got != at:
+        raise SystemExit("fake_game: cannot map %#x (errno %d)" % (at, ctypes.get_errno()))
+    return (ctypes.c_char * size).from_address(at), at
 
 
 def main(argv):
     stamp = int(argv[argv.index("--timestamp") + 1]) if "--timestamp" in argv else TIMESTAMP
-    image = mmap.mmap(-1, SIZE_OF_IMAGE)              # anonymous, lazily backed: only touched pages cost memory
-    arena = mmap.mmap(-1, 64 * 0x1000)
-    base = ctypes.addressof(ctypes.c_char.from_buffer(image))
-    heap = ctypes.addressof(ctypes.c_char.from_buffer(arena))
+    fixed = "--fixed" in argv
+    image, base = region(SIZE_OF_IMAGE, FIXED_IMAGE if fixed else None)
+    arena, heap = region(64 * 0x1000, FIXED_ARENA if fixed else None)
     names = ["c_world", "c_gi", "c_bp_gi", "c_lp", "c_pc", "c_dune_pc", "c_bp_pc", "c_char", "c_pchar",
              "c_bp_char", "c_veh", "c_wheeled", "c_bp_bike", "c_comp", "c_bogus", "world", "gi", "lp_array",
              "lp", "pc", "char", "char_comp", "veh", "veh_comp", "bogus", "char2", "char2_comp"]
@@ -99,6 +118,9 @@ def main(argv):
         cmd = line.split()
         if not cmd or cmd[0] == "exit":
             break
+        if cmd[0] == "exec":                          # another image in this same process
+            os.execv(sys.executable, [sys.executable, "-B", os.path.abspath(__file__), argv[0], "--timestamp", cmd[1]]
+                     + (["--fixed"] if fixed else []))
         op, where, off, value = cmd[0], obj[cmd[1]], int(cmd[2], 0), cmd[3]
         if op == "f":
             put(where + off, "<f", float(value))

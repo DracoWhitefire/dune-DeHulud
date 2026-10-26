@@ -31,7 +31,8 @@ POLL_MS = 250          # 4 polls per second
 SCAN_S = 2.0           # while no game is attached, look for it every 2 seconds
 MAX_DEPTH = 4          # type checks: ClassPrivate, then at most 4 SuperStruct steps
 VALUE_MAX = 1000000.0  # accepted range of the two threat values: [0, 1e6]
-HEADER = 0x400         # PE headers are read once, from the first 0x400 bytes of the image
+HEADER = 0x400         # the PE header is identified from the first 0x400 bytes of the image when the game
+                       # is found; each poll re-reads its start up to SizeOfImage (see Meter._walk)
 MENU_HINT = "right-click"  # window hint: the full message is in the right-click menu (and on stderr)
 
 # Builds table. Key = (PE TimeDateStamp, SizeOfImage) as read from the game's mapped PE header.
@@ -232,24 +233,29 @@ class Meter:
                  clock=time.monotonic):
         self.source, self.reader_factory, self.launched = source or ProcSource(), reader_factory, launched
         self.scan_interval, self.clock = scan_interval, clock
-        self.game = None        # [pid, image base, build entry, reader, class slot values or None]
+        self.game = None        # [pid, image base, build entry, reader, class slot values or None,
+                                #  PE identity, header bytes re-read each poll]
         self.next_scan, self.reads, self.last = 0.0, 0, Reading("waiting for game")
 
     def poll(self):
         self.reads = 0
-        if self.game is None:
-            if self.clock() < self.next_scan:
-                return self.last
-            self.next_scan = self.clock() + self.scan_interval
-            self.last = self._attach()
+        for _ in range(2):           # a second round only when the attached process now runs another image
             if self.game is None:
+                if self.clock() < self.next_scan:
+                    return self.last
+                self.next_scan = self.clock() + self.scan_interval
+                self.last = self._attach()
+                if self.game is None:
+                    return self.last
+            reader = self.game[3]
+            start = reader.count
+            try:
+                self.last = self._walk()
+            finally:
+                self.reads += reader.count - start
+            if self.last is not None:
                 return self.last
-        reader = self.game[3]
-        start = reader.count
-        try:
-            self.last = self._walk()
-        finally:
-            self.reads += reader.count - start
+        self.last = Reading("no data")
         return self.last
 
     def _descends(self, pid):
@@ -285,7 +291,8 @@ class Meter:
         pid, base = found[0]
         reader = self.reader_factory(pid)
         try:
-            ident = pe_identity(reader.read(base, HEADER))
+            head = reader.read(base, HEADER)
+            ident = pe_identity(head)
         except OSError as e:
             return self._failed(e)
         finally:
@@ -297,7 +304,8 @@ class Meter:
             when = time.strftime("%Y-%m-%d %H:%M", time.gmtime(ident[0]))
             return Reading("Unsupported game version", detail=UNSUPPORTED % (ident[0], when, ident[1], known),
                            hint="PE %d" % ident[0])
-        self.game = [pid, base, BUILDS[ident], reader, None]
+        span = struct.unpack_from("<I", head, 0x3C)[0] + 0x58      # e_lfanew + what pe_identity checks
+        self.game = [pid, base, BUILDS[ident], reader, None, ident, span]
         return None
 
     def _failed(self, e):
@@ -311,13 +319,26 @@ class Meter:
         return Reading("no data")                # EFAULT/EIO: a pointer went stale during this poll
 
     def _walk(self):
-        pid, base, b, r, slots = self.game
+        """One poll of the attached game; None when the process now runs another image (identify it again)."""
+        pid, base, b, r, slots, ident, span = self.game
         try:
             alive = EXE.encode() in self.source.cmdline(pid)     # exited, reaped or pid reused: detach
         except OSError:
             alive = False
         if not alive:
             return self._failed(OSError(errno.ESRCH, "game exited"))
+        # The build and the cached class pointers belong to the image identified when the game was found. One
+        # read per poll re-checks that image's PE TimeDateStamp and SizeOfImage, so that an exec into another
+        # image under the same pid (at the same addresses) is never read with the old build's offsets.
+        try:
+            same = pe_identity(r.read(base, span)) == ident
+        except OSError as e:
+            if e.errno in (errno.EPERM, errno.EACCES, errno.ESRCH):
+                return self._failed(e)
+            same = False                                          # the header is gone: not that image
+        if not same:
+            self.game, self.next_scan = None, 0.0
+            return None
         try:
             return self._route(base, b, r, slots)
         except _Soft as s:

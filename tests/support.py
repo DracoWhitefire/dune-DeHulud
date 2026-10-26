@@ -30,6 +30,14 @@ class FakeGame:
         self.proc.stdin.flush()
         assert self.proc.stdout.readline().strip() == "ok", line
 
+    def exec_image(self, timestamp):
+        """The child execs a fresh fake game in place: same pid and (with --fixed) same addresses, but an image
+        whose PE header carries `timestamp`."""
+        self.proc.stdin.write("exec %d\n" % timestamp)
+        self.proc.stdin.flush()
+        info = json.loads(self.proc.stdout.readline())
+        assert (info["base"], info["obj"]) == (self.base, self.obj), "the new image moved"
+
     def end_without_reaping(self):
         """Let the child exit and stay a zombie (pid not reusable until close())."""
         self.proc.stdin.write("exit\n")

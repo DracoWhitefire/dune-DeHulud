@@ -95,7 +95,8 @@ game shows threat, that is the reason, not a fault of your setup.
 |---|---|---|
 | 26083551 | 1792504044 (2026-10-20 13:47 UTC) | 220008448 |
 
-DeHulud identifies the build from the game's own PE header in memory (TimeDateStamp + SizeOfImage).
+DeHulud identifies the build from the game's own PE header in memory (TimeDateStamp + SizeOfImage) and
+re-checks those two numbers on every poll.
 **After a game update** the offsets move: DeHulud then shows `-` and `Unsupported game version` with the new
 build's PE timestamp, never a guess. It needs a new DeHulud release with that build in its builds table
 (`BUILDS` in `dehulud.py`).
@@ -165,17 +166,20 @@ sandbox may block the read). The native (non-Flatpak) Steam package is the teste
 
 **How much it reads.** 4 polls per second. While the game is not found it only looks at `/proc` every
 2 seconds. Once found: one 1024-byte read of the PE header and 8 reads of class pointers, then per poll
-a fixed **15 reads on foot / 14 in a vehicle** plus one read for every class-hierarchy step the type checks
+a fixed **16 reads on foot / 15 in a vehicle** plus one read for every class-hierarchy step the type checks
 walk (0-4 steps per check, five checks), i.e.:
 
 | | reads per poll | reads per second |
 |---|---|---|
-| on foot | 16 - 35 | 64 - 140 |
-| in a vehicle | 14 - 34 | 56 - 136 |
-| test layout (Blueprint depths like the game's: 1-2 steps) | 20 on foot / 19 vehicle | **80 / 76** |
+| on foot | 17 - 36 | 68 - 144 |
+| in a vehicle | 15 - 35 | 60 - 140 |
+| test layout (the fake game's class chains: 1-2 steps per check) | 21 on foot / 20 vehicle | **84 / 80** |
 
-Each read is 8 bytes (a pointer), 12 bytes (the local-players array) or 24 bytes (threat value and
-threshold together); about 180 bytes per poll in the test layout.
+One of the fixed reads re-reads the start of the game's PE header (up to SizeOfImage: the header offset
+`e_lfanew` + 88 bytes, 216 bytes in the test layout), so that a different program image under the same
+process id is noticed and identified again instead of being read with the old build's offsets. The other
+reads are 8 bytes (a pointer), 12 bytes (the local-players array) or 24 bytes (threat value and threshold
+together); about 400 bytes per poll in the test layout.
 
 **How it finds the value.** From the game's GWorld slot: World > GameInstance > LocalPlayers[0] (the
 array size is checked before element 0 is read) > PlayerController > the possessed pawn (`Pawn`). If that

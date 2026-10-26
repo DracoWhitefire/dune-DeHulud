@@ -43,21 +43,50 @@ class UnknownBuild(GameTest):
         self.assertIn("1700000000", dehulud.format_line(r))
 
 
+class ImageReplaced(GameTest):
+    """An attachment is valid only for the image it identified: when the same process (same pid, same
+    addresses) execs into another image, the cached build and class pointers are dropped and it is identified
+    again."""
+    extra = ("--fixed",)
+
+    def test_exec_into_an_unknown_image_is_unsupported_not_a_value(self):
+        self.assertEqual(self.poll().percent, 42)
+        self.game.exec_image(1700000000)
+        with open("/proc/%d/cmdline" % self.game.pid, "rb") as f:   # our own child, now running the new image
+            self.assertIn(b"1700000000", f.read())
+        r = self.poll()
+        self.assertEqual((r.status, r.percent, r.fraction), ("Unsupported game version", None, None))
+        self.assertIn("1700000000", r.detail)
+        self.assertIsNone(self.meter.game)
+        self.assertEqual(self.poll().status, "Unsupported game version")
+
+    def test_exec_into_the_same_build_keeps_reading(self):
+        self.assertEqual(self.poll().percent, 42)
+        self.game.exec_image(1792504044)
+        self.game.cmd("f char_comp 0x334 61")
+        self.assertEqual((self.poll().status, self.poll().percent), ("on foot", 61))
+
+    def test_image_is_checked_with_one_read_per_poll(self):
+        self.poll()
+        self.poll()
+        self.assertEqual(self.meter.reads, 21)          # the walk's 20 reads + the PE header start
+
+
 class Route(GameTest):
     def test_on_foot(self):
         r = self.poll()
         self.assertEqual((r.status, r.percent), ("on foot", 42))
         self.assertAlmostEqual(r.fraction, 0.425)
-        self.assertEqual(self.meter.reads, 1 + 8 + 20)  # header + 8 class slots + the walk
+        self.assertEqual(self.meter.reads, 1 + 8 + 21)  # header + 8 class slots + header start and the walk
         r = self.poll()
         self.assertEqual((r.status, r.percent), ("on foot", 42))
-        self.assertEqual(self.meter.reads, 20)
+        self.assertEqual(self.meter.reads, 21)
 
     def test_vehicle(self):
         self.game.cmd("p pc 0x388 veh")                 # AController.Pawn = the sandbike
         r = self.poll(2)
         self.assertEqual((r.status, r.percent), ("vehicle", 80))
-        self.assertEqual(self.meter.reads, 19)
+        self.assertEqual(self.meter.reads, 20)
         self.game.cmd("p pc 0x388 char")                # back on foot
         self.assertEqual(self.poll().percent, 42)
 
@@ -107,7 +136,7 @@ class Route(GameTest):
         self.game.cmd("i gi 0x40 0")
         r = self.poll()
         self.assertEqual((r.status, r.percent), ("not in world", None))
-        self.assertEqual(self.meter.reads, 6)            # stops at the TArray: Data[0] is never read
+        self.assertEqual(self.meter.reads, 7)            # stops at the TArray: Data[0] is never read
         self.game.cmd("i gi 0x40 -1")
         self.assertIsNone(self.poll().percent)
 
