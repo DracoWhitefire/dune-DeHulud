@@ -476,6 +476,56 @@ def save_config(path, cfg):
         return False
 
 
+class _MonitorInfo(ctypes.Structure):
+    """XRRMonitorInfo (Xrandr 1.5)."""
+    _fields_ = [("name", ctypes.c_ulong), ("primary", ctypes.c_int), ("automatic", ctypes.c_int),
+                ("noutput", ctypes.c_int), ("x", ctypes.c_int), ("y", ctypes.c_int), ("width", ctypes.c_int),
+                ("height", ctypes.c_int), ("mwidth", ctypes.c_int), ("mheight", ctypes.c_int),
+                ("outputs", ctypes.c_void_p)]
+
+
+def monitors(display_name=None):
+    """The X screen's monitors as [(x, y, width, height, primary)], or [] when XRandR is unavailable.
+
+    The X screen of a multi-monitor desktop is the bounding box of all monitors, so a corner of it can lie on
+    no monitor at all; the window is placed on a real monitor instead."""
+    try:
+        x11, xrr = ctypes.CDLL("libX11.so.6"), ctypes.CDLL("libXrandr.so.2")
+    except OSError:
+        return []
+    x11.XOpenDisplay.restype, x11.XOpenDisplay.argtypes = ctypes.c_void_p, [ctypes.c_char_p]
+    x11.XDefaultRootWindow.restype, x11.XDefaultRootWindow.argtypes = ctypes.c_ulong, [ctypes.c_void_p]
+    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    xrr.XRRGetMonitors.restype = ctypes.POINTER(_MonitorInfo)
+    xrr.XRRGetMonitors.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+    xrr.XRRFreeMonitors.argtypes = [ctypes.POINTER(_MonitorInfo)]
+    dpy = x11.XOpenDisplay(display_name.encode() if display_name else None)
+    if not dpy:
+        return []
+    try:
+        n = ctypes.c_int(0)
+        info = xrr.XRRGetMonitors(dpy, x11.XDefaultRootWindow(dpy), 1, ctypes.byref(n))
+        if not info:
+            return []
+        try:
+            return [(m.x, m.y, m.width, m.height, bool(m.primary)) for m in info[:n.value]
+                    if m.width > 0 and m.height > 0]
+        finally:
+            xrr.XRRFreeMonitors(info)
+    finally:
+        x11.XCloseDisplay(dpy)
+
+
+def choose_position(x, y, mons, width):
+    """Keep a saved position whose corner lies on a monitor; otherwise the top-right of the primary monitor."""
+    if x is not None and y is not None:
+        for mx, my, mw, mh, _ in mons:
+            if mx <= x <= mx + mw - 20 and my <= y <= my + mh - 20:
+                return x, y
+    mx, my, mw, mh, _ = next((m for m in mons if m[4]), mons[0])
+    return mx + mw - width - 24, my + 48
+
+
 class Window:
     """180 x 44 always-on-top window: drag to move, right-click for the menu."""
     W, H, BAR = 180, 44, (44, 6, 130, 18)
@@ -513,10 +563,9 @@ class Window:
         self._apply_frame()
 
     def place(self):
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        x, y = self.cfg["x"], self.cfg["y"]
-        if x is None or y is None or not (0 <= x <= sw - 20 and 0 <= y <= sh - 20):
-            x, y = sw - self.W - 24, 48
+        mons = monitors(self.root.winfo_screen()) or [
+            (0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight(), True)]
+        x, y = choose_position(self.cfg["x"], self.cfg["y"], mons, self.W)
         self.pos = (x, y)
         self.root.geometry("%dx%d+%d+%d" % (self.W, self.H, x, y))
 

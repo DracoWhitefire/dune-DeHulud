@@ -481,6 +481,33 @@ class Parsing(unittest.TestCase):
         self.assertEqual(cm.exception.errno, errno.EFAULT)
 
 
+class Placement(unittest.TestCase):
+    """The window opens on a real monitor, also when the X screen's corner lies on none (mixed layouts)."""
+    # Three monitors: a portrait one at the left, the primary 4K one lower in the middle, a 1440p one lower right.
+    THREE = [(0, 0, 1440, 2560, False), (1440, 400, 3840, 2160, True), (5280, 1120, 2560, 1440, False)]
+
+    def test_default_is_top_right_of_the_primary_monitor(self):
+        self.assertEqual(dehulud.choose_position(None, None, self.THREE, 180), (1440 + 3840 - 180 - 24, 400 + 48))
+
+    def test_old_default_in_the_dead_zone_is_moved_onto_a_monitor(self):
+        # 7840 - 180 - 24 = 7636, y 48: inside the X screen but on no monitor of this layout
+        self.assertEqual(dehulud.choose_position(7636, 48, self.THREE, 180), (5076, 448))
+
+    def test_saved_position_on_any_monitor_is_kept(self):
+        for xy in ((5076, 448), (10, 10), (6000, 1500)):
+            self.assertEqual(dehulud.choose_position(*xy, self.THREE, 180), xy)
+
+    def test_without_a_primary_the_first_monitor_is_used(self):
+        mons = [(0, 0, 1920, 1080, False), (1920, 0, 1920, 1080, False)]
+        self.assertEqual(dehulud.choose_position(None, None, mons, 180), (1920 - 180 - 24, 48))
+
+    def test_single_screen_fallback_matches_the_old_default(self):
+        self.assertEqual(dehulud.choose_position(None, None, [(0, 0, 2560, 1440, True)], 180), (2560 - 204, 48))
+
+    def test_monitors_without_a_display_is_empty_not_an_error(self):
+        self.assertEqual(dehulud.monitors(":987654"), [])
+
+
 class SourceSafety(unittest.TestCase):
     """The product file may only READ: no write/attach/signal/inject/network calls anywhere in it."""
     NAMES = {"process_vm_writev", "ptrace", "kill", "killpg", "send_signal", "terminate", "pidfd_send_signal",

@@ -120,10 +120,11 @@ button. Right-click opens the menu: *Window frame* (show/hide the title bar), *R
 remembered in `$XDG_CONFIG_HOME/dehulud/config.json` (normally `~/.config/dehulud/config.json`); a damaged
 config file is ignored.
 
-**Placement:** it is meant to stay above games in *windowed* or *borderless windowed* mode and works on a
-second screen. In *exclusive fullscreen* the game may cover it. On Wayland desktops the window runs through
-XWayland and staying on top is up to your compositor; so far this was checked only on an isolated virtual
-KWin, not over a running game.
+**Placement:** the first time, it opens at the top-right of your main screen (with several screens it
+always picks a real screen); *Reset position* puts it back there. It is meant to stay above games in
+*windowed* or *borderless windowed* mode and works on a second screen. In *exclusive fullscreen* the game
+may cover it. On Wayland desktops the window runs through XWayland and staying on top is up to your
+compositor: checked on KDE Plasma (Wayland) over the running game in fullscreen, with three screens.
 
 ## Per-distribution notes
 
@@ -211,5 +212,5 @@ through an injected `/proc` source that only lists that child. They cover build 
 (simulated), the game exiting during a poll, config handling, text mode and `--launch`. The GUI test builds
 the real window only on a private headless compositor (`kwin_wayland --virtual --xwayland` under its own
 D-Bus session and runtime directory) and is skipped when that or tkinter is missing; it never uses your
-desktop's display. Not tested: a live game, `--launch` under the real Steam Linux Runtime, Flatpak Steam,
-and the distributions other than Debian 13.
+desktop's display. Checked live once (Debian 13, KDE Plasma on Wayland, native Steam). Not tested:
+`--launch` under the real Steam Linux Runtime, Flatpak Steam, and the other distributions.
