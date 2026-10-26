@@ -5,7 +5,9 @@ import io
 import json
 import os
 import re
+import shlex
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -298,6 +300,45 @@ class Permission(GameTest):
     def test_help_texts_differ_per_scope(self):
         texts = {s: dehulud.permission_help(s, False) for s in (0, 1, 2, 3, None)}
         self.assertEqual(len(set(texts.values())), 5)
+
+
+class Quoting(unittest.TestCase):
+    """Every command DeHulud prints for pasting quotes its own path, which may contain spaces or quotes."""
+
+    def setUp(self):
+        top = tempfile.mkdtemp()
+        folder = os.path.join(top, "My Tools", "Bob's \"meters\"")
+        os.makedirs(folder)
+        self.receipt = os.path.join(top, "argv.txt")
+        self.stub = os.path.realpath(os.path.join(folder, "dehulud.py"))    # an inert stand-in: records its argv
+        with open(self.stub, "w") as f:
+            f.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %s\n" % shlex.quote(self.receipt))
+        os.chmod(self.stub, 0o700)
+        patcher = mock.patch.object(dehulud, "__file__", self.stub)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def texts(self):
+        out = {"scope %s" % s: dehulud.permission_help(s, False) for s in (1, 2)}
+        with self.assertRaises(SystemExit) as cm:
+            dehulud.parse_args(["--launch"])
+        out["--launch without a command"] = str(cm.exception.code)
+        return out
+
+    def test_the_path_is_always_shell_quoted(self):
+        for name, text in self.texts().items():
+            self.assertIn(shlex.quote(self.stub) + " --launch %command%", text, name)
+            self.assertNotIn(self.stub, text, name)               # never the bare path
+
+    def test_the_printed_launch_option_runs_from_such_a_path(self):
+        text = dehulud.permission_help(1, False)
+        line = next(x.strip() for x in text.splitlines() if x.strip().endswith("--launch %command%"))
+        # Steam replaces %command% with the game's command; here an inert one. Only the stub is executed.
+        p = subprocess.run(["/bin/sh", "-c", line.replace("%command%", "/bin/true game-arg")],
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(self.receipt) as f:
+            self.assertEqual(f.read().splitlines(), ["--launch", "/bin/true", "game-arg"])
 
 
 class Launch(unittest.TestCase):

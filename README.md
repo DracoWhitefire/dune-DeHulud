@@ -22,11 +22,15 @@
 > Dune: Awakening > Properties > General > Launch Options, and enter
 >
 > ```
-> /path/to/dehulud.py --launch %command%
+> '/path/to/dehulud.py' --launch %command%
 > ```
 >
-> (use the real path, and make the file executable once: `chmod +x /path/to/dehulud.py`). Steam then starts
-> the game as a child of DeHulud, which `1` allows; DeHulud closes when the game exits. **This mode is not
+> with the real path of the file, inside the single quotes: Steam runs this line as a shell command, so
+> a path with a space in it (a folder named `My Games`, for example) would otherwise be split into two
+> words and the game would not start. Running `./dehulud.py --launch` once in the file's folder prints
+> this exact line with your path, already quoted (that also works for a path that contains a `'`). Make
+> the file executable once: `chmod +x dehulud.py`. Steam then starts the game as a child of DeHulud,
+> which `1` allows; DeHulud closes when the game exits. **This mode is not
 > yet confirmed with the Steam Linux Runtime container**: if Steam turns out to start the game outside
 > DeHulud, the window says `not started by --launch` and tells you to use the change below instead.
 >

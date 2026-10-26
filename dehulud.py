@@ -22,6 +22,7 @@ import json
 import math
 import os
 import re
+import shlex
 import struct
 import subprocess
 import sys
@@ -187,9 +188,14 @@ def reading_for(mode, blob, threshold):
     return Reading(mode, percent, min(1.0, max(0.0, blob / threshold)))
 
 
+def launch_option():
+    """The Steam launch option for this file. The path is quoted for the shell: a path with a space or a quote
+    in it would otherwise be split into several words and the game would not start."""
+    return shlex.quote(os.path.realpath(__file__)) + " --launch %command%"
+
+
 def permission_help(scope, launched):
     """The exact fix for the user's ptrace_scope value (kernel.yama.ptrace_scope)."""
-    me = os.path.realpath(__file__)
     head = "DeHulud was refused permission to read the game's memory (ptrace_scope is %s).\n" % (
         "not present" if scope is None else scope)
     if scope == 0:
@@ -203,11 +209,11 @@ def permission_help(scope, launched):
     elif scope == 1:
         fix = ("Only a program's parent may read it. Fix, pick one:\n"
                "  1. Steam > Dune: Awakening > Properties > Launch Options:\n"
-               "       %s --launch %%command%%\n"
-               "  2. Allow it until the next reboot:  sudo sysctl kernel.yama.ptrace_scope=0" % me)
+               "       %s\n"
+               "  2. Allow it until the next reboot:  sudo sysctl kernel.yama.ptrace_scope=0" % launch_option())
     elif scope == 2:
-        fix = ("Only root may read other programs. Lower it to 1 and use the Steam launch option (%s --launch "
-               "%%command%%), or to 0:\n  sudo sysctl kernel.yama.ptrace_scope=1" % me)
+        fix = ("Only root may read other programs. Lower it to 1 and use the Steam launch option (%s), or to 0:\n"
+               "  sudo sysctl kernel.yama.ptrace_scope=1" % launch_option())
     elif scope == 3:
         fix = ("Reading other programs is switched off, and ptrace_scope 3 cannot be lowered until a reboot. "
                "Change kernel.yama.ptrace_scope in the file under /etc/sysctl.d/ that sets 3, then reboot.")
@@ -726,8 +732,7 @@ def parse_args(argv):
         i = argv.index("--launch")
         own, cmd = argv[:i], argv[i + 1:]
         if not cmd:
-            raise SystemExit("dehulud: --launch needs the game command; Steam launch options: "
-                             "/path/to/dehulud.py --launch %command%")
+            raise SystemExit("dehulud: --launch needs the game command; Steam launch options: " + launch_option())
     for a in own:
         if a in ("-h", "--help"):
             print(__doc__)
