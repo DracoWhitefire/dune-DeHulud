@@ -66,17 +66,36 @@ class Route(GameTest):
         self.game.cmd("f char_comp 0x334 10")
         self.assertEqual(self.poll().percent, 80)
 
-    def test_pawn_null_uses_acknowledged_pawn(self):
-        self.game.cmd("p pc 0x388 0")
-        r = self.poll(2)
-        self.assertEqual((r.status, r.percent), ("on foot", 42))
-        self.assertEqual(self.meter.reads, 20)
+    def test_the_possessed_character_is_read(self):
+        self.game.cmd("p pc 0x388 char2")               # Pawn == AcknowledgedPawn == the second character
+        self.game.cmd("p pc 0x3f0 char2")
+        self.assertEqual((self.poll().status, self.poll().percent), ("on foot", 7))
 
-    def test_pawn_and_acknowledged_pawn_differ(self):
-        self.game.cmd("p pc 0x388 lp")                  # a non-vehicle, non-character pawn for a moment
-        r = self.poll(2)
-        self.assertEqual((r.status, r.percent), ("on foot", 42))
-        self.assertEqual(self.meter.reads, 22)
+    # Owner selection: the possessed Pawn decides. A vehicle when it passes the ADuneVehicle check; the
+    # character when it passes both character checks AND is the AcknowledgedPawn. Anything else shows '-',
+    # never the value of another object (in every case below, another object holds a valid 42 % or 7 %).
+    def test_pawn_null_is_dash_not_the_acknowledged_character(self):
+        r = self.assertDash("p pc 0x388 0")
+        self.assertEqual(r.status, "not in world")
+
+    def test_vehicle_failing_its_class_check_is_dash_not_the_character(self):
+        r = self.assertDash("p pc 0x388 veh", "p veh 0x10 c_bogus")
+        self.assertEqual(r.status, "no data")
+
+    def test_vehicle_deeper_than_the_depth_limit_is_dash_not_the_character(self):
+        # BP_Bike(0) -> Wheeled(1) -> c_bogus(2) -> c_world(3) -> c_lp(4) -> ADuneVehicle(5)
+        r = self.assertDash("p c_wheeled 0x40 c_bogus", "p c_bogus 0x40 c_world", "p c_world 0x40 c_lp",
+                            "p c_lp 0x40 c_veh", "p pc 0x388 veh")
+        self.assertEqual(r.status, "no data")
+
+    def test_character_pawn_with_another_acknowledged_pawn_is_dash(self):
+        r = self.assertDash("p pc 0x3f0 char2")         # Pawn: character (42 %), AcknowledgedPawn: another (7 %)
+        self.assertEqual(r.status, "no data")
+
+    def test_acknowledged_character_with_a_non_character_pawn_is_dash(self):
+        for pawn in ("lp", "bogus"):                    # AcknowledgedPawn stays the character (42 %)
+            r = self.assertDash("p pc 0x388 " + pawn)
+            self.assertEqual(r.status, "no data", pawn)
 
     def test_misaligned_pointer_is_rejected(self):
         self.game.cmd("i pc 0x388 12345")                # low half of the pawn pointer: odd address
@@ -143,8 +162,9 @@ class Route(GameTest):
         for c in ("p c_wheeled 0x40 c_bogus", "p c_bogus 0x40 c_world", "p c_world 0x40 c_veh", "p pc 0x388 veh"):
             self.game.cmd(c)
         self.assertEqual(self.poll().percent, 80)
-        # one more level (c_world -> c_lp -> ADuneVehicle = depth 5): refused, and the ack pawn is the same bike
-        self.assertDash("p c_world 0x40 c_lp", "p c_lp 0x40 c_veh", "p pc 0x3f0 veh")
+        # one more level (c_world -> c_lp -> ADuneVehicle = depth 5): refused, while AcknowledgedPawn is still
+        # the character with a valid 42 %
+        self.assertDash("p c_world 0x40 c_lp", "p c_lp 0x40 c_veh")
 
     def test_values_outside_the_domain_show_dash(self):
         for blob, thr, why in (("nan", "100", "no value"), ("-1", "100", "no value"), ("inf", "100", "no value"),

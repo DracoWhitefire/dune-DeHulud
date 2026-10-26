@@ -45,7 +45,7 @@ def main(argv):
     heap = ctypes.addressof(ctypes.c_char.from_buffer(arena))
     names = ["c_world", "c_gi", "c_bp_gi", "c_lp", "c_pc", "c_dune_pc", "c_bp_pc", "c_char", "c_pchar",
              "c_bp_char", "c_veh", "c_wheeled", "c_bp_bike", "c_comp", "c_bogus", "world", "gi", "lp_array",
-             "lp", "pc", "char", "char_comp", "veh", "veh_comp", "bogus"]
+             "lp", "pc", "char", "char_comp", "veh", "veh_comp", "bogus", "char2", "char2_comp"]
     obj = {n: heap + 0x1000 * i for i, n in enumerate(names)}
 
     def put(addr, fmt, value):
@@ -70,7 +70,7 @@ def main(argv):
         put(obj[child] + SUPER, "<Q", obj[parent])
     for o, cls in (("world", "c_world"), ("gi", "c_bp_gi"), ("lp", "c_lp"), ("pc", "c_bp_pc"),
                    ("char", "c_bp_char"), ("char_comp", "c_comp"), ("veh", "c_bp_bike"), ("veh_comp", "c_comp"),
-                   ("bogus", "c_bogus")):
+                   ("bogus", "c_bogus"), ("char2", "c_bp_char"), ("char2_comp", "c_comp")):
         put(obj[o] + CLASS, "<Q", obj[cls])
     put(base + GWORLD, "<Q", obj["world"])
     put(obj["world"] + WORLD_GI, "<Q", obj["gi"])
@@ -83,13 +83,16 @@ def main(argv):
     put(obj["pc"] + PC_PAWN, "<Q", obj["char"])
     put(obj["char"] + CHAR_COMP, "<Q", obj["char_comp"])
     put(obj["veh"] + VEH_COMP, "<Q", obj["veh_comp"])
-    for comp in ("char_comp", "veh_comp"):            # decoys around the two leaves: an offset error shows
+    put(obj["char2"] + CHAR_COMP, "<Q", obj["char2_comp"])   # a second player character (7 %), not possessed
+    for comp in ("char_comp", "veh_comp", "char2_comp"):  # decoys around the two leaves: an offset error shows
         for off in range(0x300, 0x380, 4):
             put(obj[comp] + off, "<f", 5000.0)
     put(obj["char_comp"] + BLOB, "<f", 42.5)
     put(obj["char_comp"] + THRESHOLD, "<f", 100.0)
     put(obj["veh_comp"] + BLOB, "<f", 80.0)
     put(obj["veh_comp"] + THRESHOLD, "<f", 100.0)
+    put(obj["char2_comp"] + BLOB, "<f", 7.0)
+    put(obj["char2_comp"] + THRESHOLD, "<f", 100.0)
 
     print(json.dumps({"base": base, "obj": obj}), flush=True)
     for line in sys.stdin:

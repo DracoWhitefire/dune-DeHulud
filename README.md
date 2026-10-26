@@ -78,8 +78,8 @@ on foot
 | `on foot` / `vehicle` | reading the character's / the driven vehicle's threat (the vehicle's, like the game's own meter, while you drive) |
 | `on foot, no threshold` / `on foot, no value` | in the world, but the threshold is unset (`<= 0`) or the value is invalid: shows `-` |
 | `waiting for game` | the game is not running (or not loaded yet) |
-| `not in world` | game found, but no player in a world yet (menus, loading screens) |
-| `no data` | a type check failed or memory moved during the read; usually only during loading |
+| `not in world` | game found, but no player in a world yet (menus, loading screens), or the player controls no pawn |
+| `no data` | a type check failed or memory moved during the read; usually only during loading, or for a moment when the controlled pawn changes (getting on or off a vehicle) |
 | `Unsupported game version` | a game build DeHulud does not know; the bar area shows its PE timestamp |
 | `no permission` | see the box at the top; right-click > *Help / details* shows the exact fix for your setting |
 | `not started by --launch` | launch-option mode, but Steam started the game outside DeHulud |
@@ -165,13 +165,12 @@ sandbox may block the read). The native (non-Flatpak) Steam package is the teste
 
 **How much it reads.** 4 polls per second. While the game is not found it only looks at `/proc` every
 2 seconds. Once found: one 1024-byte read of the PE header and 8 reads of class pointers, then per poll
-a fixed **15 reads on foot / 14 in a vehicle** (16 on foot in the moment the possessed pawn and the
-acknowledged pawn differ) plus one read for every class-hierarchy step the type checks walk (0-4 steps per
-check; five checks, six in that moment), i.e.:
+a fixed **15 reads on foot / 14 in a vehicle** plus one read for every class-hierarchy step the type checks
+walk (0-4 steps per check, five checks), i.e.:
 
 | | reads per poll | reads per second |
 |---|---|---|
-| on foot | 16 - 40 | 64 - 160 |
+| on foot | 16 - 35 | 64 - 140 |
 | in a vehicle | 14 - 34 | 56 - 136 |
 | test layout (Blueprint depths like the game's: 1-2 steps) | 20 on foot / 19 vehicle | **80 / 76** |
 
@@ -179,12 +178,13 @@ Each read is 8 bytes (a pointer), 12 bytes (the local-players array) or 24 bytes
 threshold together); about 180 bytes per poll in the test layout.
 
 **How it finds the value.** From the game's GWorld slot: World > GameInstance > LocalPlayers[0] (the
-array size is checked before element 0 is read) > PlayerController > the possessed pawn. If that pawn is a
-vehicle (ADuneVehicle) it reads the vehicle's `m_SandwormThreatSourceComponent`, otherwise the player
-character's (ADuneCharacter and ADunePlayerCharacter, via AcknowledgedPawn), then the component's
-`m_CurrentThreatBlobValue` and `m_CurrentSandwormAttackThreshold`. Every object on the way is type-checked
-against the game's own class pointers, so a moved or freed object shows `-`, not garbage. Every offset in
-`dehulud.py` is commented with the game member it reads.
+array size is checked before element 0 is read) > PlayerController > the possessed pawn (`Pawn`). If that
+pawn is a vehicle (ADuneVehicle) it reads the vehicle's `m_SandwormThreatSourceComponent`; if it is the
+player character (ADuneCharacter and ADunePlayerCharacter) and also the controller's `AcknowledgedPawn`, the
+character's. Any other pawn, or none, shows `-`: DeHulud never falls back to another object's value. Then it
+reads the component's `m_CurrentThreatBlobValue` and `m_CurrentSandwormAttackThreshold`. Every object on the
+way is type-checked against the game's own class pointers, so a moved or freed object shows `-`, not garbage.
+Every offset in `dehulud.py` is commented with the game member it reads.
 
 ## Terms of service and anti-cheat
 

@@ -57,8 +57,8 @@ BUILDS = {
         "array_data": 0x0,                       # TArray.Data (element stride 8)
         "array_num": 0x8,                        # TArray.Num (i32)
         "player_controller": 0x30,               # ULocalPlayer.PlayerController
-        "pawn": 0x388,                           # AController.Pawn (the possessed pawn: vehicle route)
-        "acknowledged_pawn": 0x3F0,              # APlayerController.AcknowledgedPawn (on-foot route)
+        "pawn": 0x388,                           # AController.Pawn (the possessed pawn: decides the route)
+        "acknowledged_pawn": 0x3F0,              # APlayerController.AcknowledgedPawn (on foot: must equal Pawn)
         "character_threat": 0xE88,               # ADuneCharacter.m_SandwormThreatSourceComponent
         "vehicle_threat": 0xE08,                 # ADuneVehicle.m_SandwormThreatSourceComponent
         "threat_blob": 0x334,                    # m_CurrentThreatBlobValue (f32)
@@ -375,19 +375,19 @@ class Meter:
         witness(lp, "cls_local_player")                                       # type check: ULocalPlayer
         pc = obj(lp + b["player_controller"])
         witness(pc, "cls_player_controller")                                  # type check: APlayerController
-        pawn = ptr(pc + b["pawn"])                                            # possessed pawn
+        # The possessed Pawn alone decides whose threat is shown: the vehicle's when it passes the ADuneVehicle
+        # check, the character's when it passes both character checks and is also the AcknowledgedPawn.
+        # Anything else shows '-'; there is no fallback to another object.
+        pawn = obj(pc + b["pawn"])                                            # AController.Pawn
         hits = chain(pawn, ("cls_dune_vehicle",) + tuple(CHARACTER),
-                     lambda h: "cls_dune_vehicle" in h or CHARACTER <= h) if pawn else set()
+                     lambda h: "cls_dune_vehicle" in h or CHARACTER <= h)
         if "cls_dune_vehicle" in hits:                                        # type check: ADuneVehicle
-            owner, field, mode = pawn, b["vehicle_threat"], "vehicle"
+            field, mode = b["vehicle_threat"], "vehicle"
+        elif CHARACTER <= hits and ptr(pc + b["acknowledged_pawn"]) == pawn:  # both character checks, same object
+            field, mode = b["character_threat"], "on foot"
         else:
-            ack = obj(pc + b["acknowledged_pawn"])
-            if ack != pawn:
-                hits = chain(ack, tuple(CHARACTER), lambda h: CHARACTER <= h)
-            if not CHARACTER <= hits:                                         # ADuneCharacter AND ADunePlayerCharacter
-                raise _Soft("no data")
-            owner, field, mode = ack, b["character_threat"], "on foot"
-        comp = obj(owner + field)
+            raise _Soft("no data")
+        comp = obj(pawn + field)
         # Type check: USandwormThreatSourceComponent or a subclass within 4 SuperStruct steps. One read when
         # the class is the native one, and the two value offsets hold for any subclass.
         witness(comp, "cls_threat_component")
