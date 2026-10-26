@@ -810,7 +810,9 @@ class Placement(unittest.TestCase):
 
 
 class SourceSafety(unittest.TestCase):
-    """The product file may only READ: no write/attach/signal/inject/network calls anywhere in it."""
+    """Source lint: no write/attach/signal/inject/network call or network module anywhere in the product file's
+    code. It checks this file's text only; it cannot see what libraries (Tk, Xlib) do at run time and is no
+    sandbox (the window's display is checked by local_display, see class Display)."""
     NAMES = {"process_vm_writev", "ptrace", "kill", "killpg", "send_signal", "terminate", "pidfd_send_signal",
              "tgkill", "tkill", "socket", "create_connection", "urlopen", "pwrite", "pwritev", "process_madvise",
              "PTRACE_ATTACH", "PTRACE_SEIZE", "PTRACE_POKEDATA", "PR_SET_PTRACER", "XTestFakeKeyEvent", "system",

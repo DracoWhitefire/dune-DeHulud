@@ -7,12 +7,12 @@ always-on-top window (or one terminal line). It finds the running game (Proton) 
   dehulud.py                    window (falls back to text without tkinter or a local X display)
   dehulud.py --text             one-line meter in the terminal
   dehulud.py --launch %command% Steam launch options: starts the game as a child of DeHulud, so a
-                                ptrace_scope of 1 (descendants only) allows the read without a system change
+                                ptrace_scope of 1 (descendants only) allows the read
 
-Read-only: it reads /proc/<pid>/{cmdline,maps,status} of your own processes and the game's memory
-with process_vm_readv, nothing else. It never writes to the game, never attaches a debugger, never
-signals or injects anything, sends no input and opens no network connection (the window only opens a
-local X display, through its Unix socket).
+Read-only: it reads /proc/<pid>/{cmdline,maps,status} of your own processes, the game's memory with
+process_vm_readv, the ptrace setting, /etc/os-release and its own config file. It never writes to the
+game, never attaches a debugger, never signals or injects anything, sends no input and opens no network
+connection (the window only opens a local X display, through its Unix socket).
 Python 3.9+, standard library only.
 """
 import collections

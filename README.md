@@ -3,8 +3,8 @@
 > [!IMPORTANT]
 > **Before you start: permission to read the game**
 >
-> DeHulud reads one number out of the running game's memory. Linux only allows that if your
-> system's *ptrace* setting permits it. Check yours:
+> DeHulud reads the threat value and its threshold out of the running game's memory. Linux only allows
+> that if your system's *ptrace* setting permits it. Check yours:
 >
 > ```
 > cat /proc/sys/kernel/yama/ptrace_scope
@@ -44,13 +44,21 @@
 >
 > **Change it permanently:** first look for a file that already sets it:
 > `grep -rs ptrace_scope /etc/sysctl.d /run/sysctl.d /usr/lib/sysctl.d /usr/local/lib/sysctl.d /etc/sysctl.conf`.
-> If a file in `/etc/` sets it, edit that line; if a file in `/usr/lib/sysctl.d/` sets it, create a file
-> with the *same name* in `/etc/sysctl.d/` (it replaces the packaged one). Otherwise:
 >
-> ```
-> echo 'kernel.yama.ptrace_scope = 0' | sudo tee /etc/sysctl.d/10-ptrace.conf
-> sudo sysctl --system
-> ```
+> - If a file under `/etc/` sets it: **write down the old value**, change that line to `0`, then run
+>   `sudo sysctl --system`.
+> - Otherwise (nothing sets it, or only a packaged file under `/usr/lib/`, `/usr/local/lib/` or `/run/`):
+>   add a file of your own. Of several files that set the same value, the one whose name sorts last wins,
+>   so this file overrides the packaged one without touching it or its other settings:
+>
+>   ```
+>   echo 'kernel.yama.ptrace_scope = 0' | sudo tee /etc/sysctl.d/99-dehulud-ptrace.conf
+>   sudo sysctl --system
+>   cat /proc/sys/kernel/yama/ptrace_scope
+>   ```
+>
+>   The last line should print `0`. Do not create a file with the *same name* as a packaged one: it
+>   replaces the packaged file completely, with all of its other settings.
 >
 > **Trade-off:** with `0`, any program running as your user can read the memory of your other programs
 > (browser, password manager), which is exactly what `1` to `3` prevent, so prefer the launch option.
@@ -75,8 +83,9 @@ on foot
 - **Colour:** green below 50 %, amber from 50 % to below 75 %, red from 75 %; grey when there is no value.
 - **`-` instead of a number** (never a fake `0%`) whenever there is nothing trustworthy to show: no game,
   not in the world (menus, loading), a type check of the route failed, a value is not a number or negative,
-  or the threshold is missing or `<= 0` (for example outside a worm area). A real `0%` is shown only for a
-  genuine zero threat with a valid threshold.
+  or the threshold is missing or `<= 0` (for example outside a worm area). `0%` is a real reading: because
+  the percent is rounded down, it means a valid threat below 1 % of the threshold (a small non-zero threat
+  shows `0%` too), never a missing value.
 - **Status line:**
 
 | status | meaning |
@@ -102,21 +111,35 @@ game shows threat, that is the reason, not a fault of your setup.
 | 26083551 | 1792504044 (2026-10-20 13:47 UTC) | 220008448 |
 
 DeHulud identifies the build from the game's own PE header in memory (TimeDateStamp + SizeOfImage) and
-re-checks those two numbers on every poll.
+re-checks those two numbers on every poll. That is a quick check of two header fields, not a checksum of
+the game file.
 **After a game update** the offsets move: DeHulud then shows `-` and `Unsupported game version` with the new
 build's PE timestamp, never a guess. It needs a new DeHulud release with that build in its builds table
 (`BUILDS` in `dehulud.py`).
 
 ## Running it
 
-Requirements: Linux, Python 3.9 or newer, and tkinter for the window (without tkinter it falls back to text
-mode and tells you which package to install).
+Requirements: Linux, Python 3.9 or newer (tested with 3.11, 3.12 and 3.13; `python3 --version` shows
+yours), and tkinter for the window (without tkinter it falls back to text mode and tells you which package
+to install).
+
+**The first time, step by step:**
+
+1. Download `dehulud.py` from the project page (or the whole project as a ZIP file, then unzip it:
+   right-click the ZIP > *Extract*, or `unzip` in a terminal).
+2. Put `dehulud.py` in a folder of your own and leave it there, for example a new folder `dehulud` in your
+   home folder. The Steam launch option, if you use it, points to this place.
+3. Open a terminal in that folder: in the file manager, right-click inside the folder > *Open Terminal
+   Here* (Dolphin: *Open Terminal*, or F4; GNOME Files: *Open in Terminal*). Or open any terminal and type
+   `cd ~/dehulud`.
+4. Make the file executable, once: `chmod +x dehulud.py`
+5. Check the permission box at the top of this page, then start it: `./dehulud.py`
 
 ```
-chmod +x dehulud.py
 ./dehulud.py                  # window
 ./dehulud.py --text           # one line in the terminal instead
 ./dehulud.py --launch CMD...  # start CMD (Steam's %command%) and read the game it starts
+python3 dehulud.py            # the same without chmod
 ```
 
 Start it before or after the game; it waits for the game and notices when the game exits.
@@ -128,7 +151,8 @@ remembered in `$XDG_CONFIG_HOME/dehulud/config.json` (normally `~/.config/dehulu
 config file is ignored.
 
 **Placement:** the first time, it opens at the top-right of your main screen (with several screens it
-always picks a real screen); *Reset position* puts it back there. It is meant to stay above games in
+picks a real screen when the display reports its monitors through XRandR); *Reset position* puts it back
+there. It is meant to stay above games in
 *windowed* or *borderless windowed* mode and works on a second screen. In *exclusive fullscreen* the game
 may cover it. On Wayland desktops the window runs through XWayland and staying on top is up to your
 compositor: checked on KDE Plasma (Wayland) over the running game in fullscreen, with three screens.
@@ -156,7 +180,8 @@ its process and file name, which the sandbox does not hide from your desktop ses
 permission rules above still apply. What is not known (not tested): whether reading a sandboxed game works
 with `ptrace_scope` `0`, and whether `--launch` works at all inside the Flatpak (the launch option runs
 inside the sandbox, which must be able to see `dehulud.py`, run Python 3 and open a window, and the
-sandbox may block the read). The native (non-Flatpak) Steam package is the tested target.
+sandbox may block the read). The one live check so far used the native (non-Flatpak) Steam package (see
+the end of this page).
 
 ## Read-only and no network: what DeHulud does and does not do
 
@@ -172,8 +197,10 @@ sandbox may block the read). The native (non-Flatpak) Steam package is the teste
   before anything graphical is loaded, and DeHulud runs as the text meter with a one-line explanation. It
   hands Tk the display as `unix/:N`, the form with which Xlib uses only the display's Unix socket: with a
   plain `:N` Xlib falls back to a TCP connection on `localhost` when that socket cannot be reached.
-- The test suite enforces this: it fails if `dehulud.py` contains a memory-write, debugger, signal,
-  process-kill or network call, or imports a network module.
+- A source lint in the test suite checks the code of `dehulud.py`: it fails if the file contains a
+  memory-write, debugger, signal, process-kill or network call, or imports a network module. That is a
+  check of this file's text, not complete enforcement: it cannot see what libraries such as Tk and Xlib do
+  at run time (the display check above covers the window's connection), and it is not a sandbox.
 
 **How much it reads.** 4 polls per second. While the game is not found it only looks at `/proc` every
 2 seconds. Once found: one 1024-byte read of the PE header and 8 reads of class pointers, then per poll
@@ -198,8 +225,10 @@ pawn is a vehicle (ADuneVehicle) it reads the vehicle's `m_SandwormThreatSourceC
 player character (ADuneCharacter and ADunePlayerCharacter) and also the controller's `AcknowledgedPawn`, the
 character's. Any other pawn, or none, shows `-`: DeHulud never falls back to another object's value. Then it
 reads the component's `m_CurrentThreatBlobValue` and `m_CurrentSandwormAttackThreshold`. Every object on the
-way is type-checked against the game's own class pointers, so a moved or freed object shows `-`, not garbage.
-Every offset in `dehulud.py` is commented with the game member it reads.
+way is type-checked against the game's own class pointers, so a moved or freed object normally fails a
+check and shows `-` instead of garbage. A type check cannot catch everything: memory that was freed and
+then reused by another object of the same type passes it. Every offset in `dehulud.py` is commented with
+the game member it reads.
 
 ## Terms of service and anti-cheat
 
@@ -210,9 +239,18 @@ for your account. **Use at your own risk.**
 ## Uninstall
 
 1. Delete `dehulud.py` and the config folder `~/.config/dehulud` (or `$XDG_CONFIG_HOME/dehulud`).
-2. Remove the Steam launch option if you added one.
-3. If you changed the ptrace setting: delete the file you created (for example
-   `sudo rm /etc/sysctl.d/10-ptrace.conf`) and reboot (or set your old value with `sudo sysctl`).
+2. Remove the Steam launch option if you added one (Steam > Dune: Awakening > Properties > General >
+   Launch Options: delete the line).
+3. If you changed the ptrace setting, put back what was there before:
+   - Changed only with `sudo sysctl kernel.yama.ptrace_scope=0`: a reboot restores it, or set your old
+     value now, for example `sudo sysctl kernel.yama.ptrace_scope=1`.
+   - Created `/etc/sysctl.d/99-dehulud-ptrace.conf`: `sudo rm /etc/sysctl.d/99-dehulud-ptrace.conf`, then
+     `sudo sysctl --system`. That applies a packaged file's value again; if no file sets the value, the
+     kernel's default only returns with a reboot (or set the old value with `sudo sysctl` as above).
+   - Edited a line in an existing file: set that line back to the old value you wrote down, then run
+     `sudo sysctl --system`.
+   - Fedora, if you used them: `sudo dnf remove yama-ptrace-enable`, and `sudo setsebool deny_ptrace on`
+     if you switched SELinux's `deny_ptrace` off (add `-P` if you used `-P`).
 
 ## Development
 
@@ -223,9 +261,13 @@ python3 -m unittest discover -s tests
 The tests start a fake game: a child Python process that lays out the whole route (fake PE header, class
 objects, pointers and the two floats) in its own memory, and DeHulud reads it with `process_vm_readv`
 through an injected `/proc` source that only lists that child. They cover build matching, on foot, vehicle,
+owner selection (a pawn that fails its check is `-`), the same process exec'ing into another image,
 `LocalPlayers` empty, every type check, invalid values, permission errors for each `ptrace_scope` value
-(simulated), the game exiting during a poll, config handling, text mode and `--launch`. The GUI test builds
+(simulated), `--launch` for each value with and without the game descending from DeHulud, the game exiting
+during a poll, the local-display check, quoting of printed commands, config handling and text mode. The
+GUI test builds
 the real window only on a private headless compositor (`kwin_wayland --virtual --xwayland` under its own
 D-Bus session and runtime directory) and is skipped when that or tkinter is missing; it never uses your
-desktop's display. Checked live once (Debian 13, KDE Plasma on Wayland, native Steam). Not tested:
-`--launch` under the real Steam Linux Runtime, Flatpak Steam, and the other distributions.
+desktop's display. Checked live once, on one PC: KDE Plasma (Wayland), native Steam, the game in
+fullscreen. Not tested: `--launch` under the real Steam Linux Runtime, Flatpak Steam, other desktops and
+other distributions.
