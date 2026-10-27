@@ -192,7 +192,8 @@ pub struct Window<'m> {
     win: u32,
     pixmap: u32,
     meter: &'m mut dyn Poll,
-    path: PathBuf,
+    /// The config file; None without a home folder (then the position is not kept).
+    path: Option<PathBuf>,
     pub cfg: Config,
     pub pos: (i32, i32),
     drag: Option<(i32, i32)>,
@@ -208,7 +209,7 @@ pub struct Window<'m> {
 
 impl<'m> Window<'m> {
     /// Opens the window on display `d` (a display on this computer, through its Unix socket).
-    pub fn new(d: &LocalDisplay, meter: &'m mut dyn Poll, path: PathBuf, help_text: &str) -> Res<Self> {
+    pub fn new(d: &LocalDisplay, meter: &'m mut dyn Poll, path: Option<PathBuf>, help_text: &str) -> Res<Self> {
         let c = display::connect(d)?;
         let setup = c.conn.setup();
         let screen = &setup.roots[c.screen];
@@ -266,7 +267,7 @@ impl<'m> Window<'m> {
         }
         let gc = x(conn.generate_id())?;
         x(conn.create_gc(gc, root, &CreateGCAux::new().graphics_exposures(0)))?;
-        let cfg = config::load_config(&path);
+        let cfg = path.as_deref().map_or(config::DEFAULTS, config::load_config);
         let mut w = Window {
             c,
             root,
@@ -505,7 +506,9 @@ impl<'m> Window<'m> {
     }
 
     fn save(&self) {
-        config::save_config(&self.path, &self.cfg);
+        if let Some(path) = &self.path {
+            config::save_config(path, &self.cfg);
+        }
     }
 
     pub fn toggle_frame(&mut self) -> Res<()> {

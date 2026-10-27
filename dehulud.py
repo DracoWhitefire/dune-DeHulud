@@ -512,15 +512,25 @@ DEFAULTS = {"x": None, "y": None, "frame": False}
 
 
 def config_path(env=None):
-    base = (os.environ if env is None else env).get("XDG_CONFIG_HOME", "")
+    """$XDG_CONFIG_HOME/dehulud/config.json; $HOME/.config when XDG_CONFIG_HOME is unset or not absolute. None
+    when neither is known: the window then keeps no position. There is deliberately no password-database
+    fallback (os.path.expanduser does one without HOME): that lookup can ask a local name service over a
+    socket (nscd, systemd-userdb), and the meter opens no socket other than its X display."""
+    env = os.environ if env is None else env
+    base = env.get("XDG_CONFIG_HOME", "")
     if not os.path.isabs(base):
-        base = os.path.join(os.path.expanduser("~"), ".config")
+        home = env.get("HOME")
+        if home is None:
+            return None
+        base = os.path.join(home.rstrip("/") or "/", ".config")
     return os.path.join(base, "dehulud", "config.json")
 
 
 def load_config(path):
     """Window position and frame flag; anything missing or malformed falls back to the defaults."""
     cfg = dict(DEFAULTS)
+    if path is None:
+        return cfg
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -537,6 +547,8 @@ def load_config(path):
 
 
 def save_config(path, cfg):
+    if path is None:
+        return False
     try:
         os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
         with open(path + ".tmp", "w", encoding="utf-8") as f:

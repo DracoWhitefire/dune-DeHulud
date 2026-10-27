@@ -717,10 +717,19 @@ class Config(unittest.TestCase):
 
     def test_path(self):
         self.assertEqual(dehulud.config_path({"XDG_CONFIG_HOME": "/x/cfg"}), "/x/cfg/dehulud/config.json")
-        home = os.path.expanduser("~")
-        self.assertEqual(dehulud.config_path({}), os.path.join(home, ".config", "dehulud", "config.json"))
-        self.assertEqual(dehulud.config_path({"XDG_CONFIG_HOME": "relative"}),
-                         os.path.join(home, ".config", "dehulud", "config.json"))
+        self.assertEqual(dehulud.config_path({"HOME": "/h"}), "/h/.config/dehulud/config.json")
+        self.assertEqual(dehulud.config_path({"HOME": "/h//"}), "/h/.config/dehulud/config.json")
+        self.assertEqual(dehulud.config_path({"HOME": ""}), "/.config/dehulud/config.json")
+        self.assertEqual(dehulud.config_path({"HOME": "/h", "XDG_CONFIG_HOME": "relative"}),
+                         "/h/.config/dehulud/config.json")
+        # without HOME: an absolute XDG_CONFIG_HOME still works, otherwise no config file (no password lookup)
+        self.assertEqual(dehulud.config_path({"XDG_CONFIG_HOME": "/x/cfg"}), "/x/cfg/dehulud/config.json")
+        self.assertIsNone(dehulud.config_path({}))
+        self.assertIsNone(dehulud.config_path({"XDG_CONFIG_HOME": "relative"}))
+
+    def test_no_config_file_without_home(self):
+        self.assertEqual(dehulud.load_config(None), {"x": None, "y": None, "frame": False})
+        self.assertFalse(dehulud.save_config(None, {"x": 1, "y": 2, "frame": True}))
 
     def test_missing_and_bad_configs_give_defaults(self):
         defaults = {"x": None, "y": None, "frame": False}
@@ -829,9 +838,9 @@ class SourceSafety(unittest.TestCase):
     NAMES = {"process_vm_writev", "ptrace", "kill", "killpg", "send_signal", "terminate", "pidfd_send_signal",
              "tgkill", "tkill", "socket", "create_connection", "urlopen", "pwrite", "pwritev", "process_madvise",
              "PTRACE_ATTACH", "PTRACE_SEIZE", "PTRACE_POKEDATA", "PR_SET_PTRACER", "XTestFakeKeyEvent", "system",
-             "popen", "execv", "execvp", "fork"}
+             "popen", "execv", "execvp", "fork", "expanduser", "getpwuid", "getpwnam", "getpwall"}
     MODULES = {"socket", "urllib", "http", "ssl", "requests", "ftplib", "smtplib", "asyncio", "signal", "xmlrpc",
-               "telnetlib", "multiprocessing", "webbrowser", "selectors"}
+               "telnetlib", "multiprocessing", "webbrowser", "selectors", "pwd", "grp"}
     STRINGS = re.compile(r"process_vm_writev|/mem\b|pagemap|/environ\b|\bptrace\(|https?://|PTRACE_")
 
     def test_forbidden_calls_absent(self):

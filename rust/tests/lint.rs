@@ -56,6 +56,14 @@ const NAMES: &[&str] = &[
     "ConnectAddress",
     "parse_display",
     "getaddrinfo",
+    // password / group database (may ask a local name service over a socket)
+    "getpwuid",
+    "getpwuid_r",
+    "getpwnam",
+    "getpwnam_r",
+    "getpwent",
+    "getgrgid",
+    "getgrnam",
     // input automation
     "xtest",
     "XTest",
@@ -82,7 +90,7 @@ const STRINGS: &[&str] =
 
 /// The only libc functions the product calls.
 const LIBC_CALLS: &[&str] =
-    &["process_vm_readv", "getuid", "gethostname", "getpwuid_r", "isatty", "sigaction", "sigemptyset", "poll"];
+    &["process_vm_readv", "getuid", "gethostname", "isatty", "sigaction", "sigemptyset", "poll"];
 
 /// (code without comments and string contents, the string literals).
 fn split(src: &str) -> (String, Vec<String>) {

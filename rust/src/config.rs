@@ -17,41 +17,29 @@ pub struct Config {
 
 pub const DEFAULTS: Config = Config { x: None, y: None, frame: false };
 
-/// The user's home folder like Python's `os.path.expanduser("~")`: $HOME, else the password database.
-pub fn home() -> PathBuf {
-    if let Some(h) = std::env::var_os("HOME") {
-        let s = h.to_string_lossy();
-        let trimmed = s.trim_end_matches('/');
-        return PathBuf::from(if trimmed.is_empty() { "/" } else { trimmed });
-    }
-    let mut buf = vec![0 as libc::c_char; 4096];
-    // SAFETY: an all-zero passwd is a valid out-parameter; buf is valid for its length; result is checked
-    // before the returned pointers are used, and they point into buf.
-    unsafe {
-        let mut pw: libc::passwd = std::mem::zeroed();
-        let mut result: *mut libc::passwd = std::ptr::null_mut();
-        if libc::getpwuid_r(libc::getuid(), &mut pw, buf.as_mut_ptr(), buf.len(), &mut result) == 0
-            && !result.is_null()
-            && !pw.pw_dir.is_null()
-        {
-            let dir = std::ffi::CStr::from_ptr(pw.pw_dir).to_string_lossy().into_owned();
-            return PathBuf::from(dir);
-        }
-    }
-    PathBuf::from("/")
+/// The user's home folder from $HOME, trailing slashes removed (an empty $HOME is "/"), like Python's
+/// `os.path.expanduser("~")` when HOME is set. None without $HOME: there is deliberately no password-database
+/// fallback, because that lookup can ask a local name service over a socket (nscd, systemd-userdb) and the
+/// meter opens no socket other than its X display.
+pub fn home() -> Option<PathBuf> {
+    let h = std::env::var_os("HOME")?;
+    let s = h.to_string_lossy();
+    let trimmed = s.trim_end_matches('/');
+    Some(PathBuf::from(if trimmed.is_empty() { "/" } else { trimmed }))
 }
 
-/// `$XDG_CONFIG_HOME/dehulud/config.json`; ~/.config when XDG_CONFIG_HOME is unset or not absolute.
-pub fn config_path_from(xdg: Option<&OsStr>, home: &Path) -> PathBuf {
+/// `$XDG_CONFIG_HOME/dehulud/config.json`; ~/.config when XDG_CONFIG_HOME is unset or not absolute. None when
+/// neither an absolute XDG_CONFIG_HOME nor a home folder is known: the window then keeps no position.
+pub fn config_path_from(xdg: Option<&OsStr>, home: Option<&Path>) -> Option<PathBuf> {
     let base = match xdg {
         Some(x) if Path::new(x).is_absolute() => PathBuf::from(x),
-        _ => home.join(".config"),
+        _ => home?.join(".config"),
     };
-    base.join("dehulud").join("config.json")
+    Some(base.join("dehulud").join("config.json"))
 }
 
-pub fn config_path() -> PathBuf {
-    config_path_from(std::env::var_os("XDG_CONFIG_HOME").as_deref(), &home())
+pub fn config_path() -> Option<PathBuf> {
+    config_path_from(std::env::var_os("XDG_CONFIG_HOME").as_deref(), home().as_deref())
 }
 
 /// Window position and frame flag; anything missing or malformed falls back to the defaults.
@@ -145,14 +133,16 @@ mod tests {
 
     #[test]
     fn path() {
-        let home = Path::new("/h");
-        assert_eq!(config_path_from(Some(OsStr::new("/x/cfg")), home), PathBuf::from("/x/cfg/dehulud/config.json"));
-        assert_eq!(config_path_from(None, home), PathBuf::from("/h/.config/dehulud/config.json"));
-        assert_eq!(
-            config_path_from(Some(OsStr::new("relative")), home),
-            PathBuf::from("/h/.config/dehulud/config.json")
-        );
-        assert_eq!(config_path_from(Some(OsStr::new("")), home), PathBuf::from("/h/.config/dehulud/config.json"));
+        let home = Some(Path::new("/h"));
+        let p = |s: &str| Some(PathBuf::from(s));
+        assert_eq!(config_path_from(Some(OsStr::new("/x/cfg")), home), p("/x/cfg/dehulud/config.json"));
+        assert_eq!(config_path_from(None, home), p("/h/.config/dehulud/config.json"));
+        assert_eq!(config_path_from(Some(OsStr::new("relative")), home), p("/h/.config/dehulud/config.json"));
+        assert_eq!(config_path_from(Some(OsStr::new("")), home), p("/h/.config/dehulud/config.json"));
+        // without a home folder: an absolute XDG_CONFIG_HOME still works, otherwise no config file at all
+        assert_eq!(config_path_from(Some(OsStr::new("/x/cfg")), None), p("/x/cfg/dehulud/config.json"));
+        assert_eq!(config_path_from(None, None), None);
+        assert_eq!(config_path_from(Some(OsStr::new("relative")), None), None);
     }
 
     #[test]
