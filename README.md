@@ -151,7 +151,9 @@ Start it before or after the game; it waits for the game and notices when the ga
 button. Right-click opens the menu: *Window frame* (show/hide the title bar), *Reset position*,
 *Help / details* (the full message behind `no permission` and similar states) and *Quit*. Its position is
 remembered in `$XDG_CONFIG_HOME/dehulud/config.json` (normally `~/.config/dehulud/config.json`); a damaged
-config file is ignored.
+config file is ignored. Without `HOME` (and without an absolute `XDG_CONFIG_HOME`) no position is kept: DeHulud
+does not look the home folder up in the user database, because that can involve a local name service. (With
+`HOME` unset, the Python interpreter's own start-up may still do that lookup; the Rust version does not.)
 
 **Placement:** the first time, it opens at the top-right of your main screen (with several screens it
 picks a real screen when the display reports its monitors through XRandR); *Reset position* puts it back
@@ -165,7 +167,9 @@ The folder `rust/` holds the same meter written in Rust: **one static binary, no
 nothing else to install. It finds the game the same way, checks the same game build (and re-checks it on every
 poll), reads the same two values with the same type checks and owner rules, and shows the same window, menu,
 statuses and terminal line. It uses the same config file (`$XDG_CONFIG_HOME/dehulud/config.json`), so a
-position saved by one version is used by the other.
+position saved by one version is used by the other. (One small difference: the Rust version reads a config
+file nested at most 500 levels deep and uses the defaults for a deeper one. DeHulud itself only ever writes a
+flat file, so this matters only for a hand-edited file.)
 
 **Run the prebuilt binary** (when you have one): put the file `dehulud` in a folder of your own, open a
 terminal in that folder and run
@@ -232,8 +236,9 @@ cargo test --release --features test-source     # also: the fake-game scenarios 
 ```
 
 `test-source` is a test-only build option: it lets the tests point the meter at their own fake game and record
-each poll. It is never part of a release build (the code is not compiled in), and a binary built with it refuses
-to run without the test's control file. The Python tests (`python3 -m unittest discover -s tests`) are unchanged
+each poll. The normal build commands above never enable it (the code is not compiled in); only a build that
+names `--features test-source` - such as the test command above, even with `--release` - contains it, and a
+binary built with it refuses to run without the test's control file. Share only binaries from the normal build. The Python tests (`python3 -m unittest discover -s tests`) are unchanged
 and cover the Python version.
 
 ## Per-distribution notes
@@ -317,7 +322,8 @@ for your account. **Use at your own risk.**
 
 ## Uninstall
 
-1. Delete `dehulud.py` and the config folder `~/.config/dehulud` (or `$XDG_CONFIG_HOME/dehulud`).
+1. Delete `dehulud.py` and/or the Rust binary `dehulud`, and the config folder `~/.config/dehulud` (or
+   `$XDG_CONFIG_HOME/dehulud`).
 2. Remove the Steam launch option if you added one (Steam > Dune: Awakening > Properties > General >
    Launch Options: delete the line).
 3. If you changed the ptrace setting, put back what was there before:
