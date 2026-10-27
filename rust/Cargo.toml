@@ -1,0 +1,22 @@
+[package]
+name = "dehulud"
+version = "0.1.0"
+edition = "2024"
+description = "Read-only sandworm threat meter for Dune: Awakening on Linux"
+publish = false
+
+[dependencies]
+libc = "0.2.191"
+x11rb = { version = "0.13.2", default-features = false, features = ["randr"] }
+
+[features]
+# Test builds only: lets the integration tests point the meter at their fake game (see src/testhook.rs).
+# Release builds never enable it.
+test-source = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
