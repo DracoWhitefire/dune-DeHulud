@@ -142,6 +142,7 @@ impl Source for TestSource {
     fn maps(&self, pid: i32) -> io::Result<String> {
         let c = self.check(pid)?;
         let Some(b) = c.num("base") else { return Ok(String::new()) };
+        let size = c.num("size").unwrap_or(220008448); // the fake game's SizeOfImage
         Ok(format!(
             "55d000000000-55d000021000 r--p 00000000 103:02 77 /usr/bin/wine64-preloader\n\
              {b:x}-{:x} r--p 00000000 103:02 1234 /games/DUNE Awakening/DuneSandbox/Binaries/Win64/DuneSandbox-Win64-Shipping.exe\n\
@@ -149,7 +150,7 @@ impl Source for TestSource {
              7ffc00000000-7ffc00021000 rw-p 00000000 00:00 0 [stack]\n",
             b + 0x1000,
             b + 0x1000,
-            b + 220008448
+            b + size
         ))
     }
     fn ppid(&self, pid: i32) -> io::Result<i32> {

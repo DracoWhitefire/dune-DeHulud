@@ -26,7 +26,28 @@ class Build(GameTest):
         self.assertEqual(self.meter.game[2]["build"], "26083551")
 
     def test_builds_table_identity(self):
-        self.assertEqual(sorted(dehulud.BUILDS), [(1792504044, 220008448)])
+        self.assertEqual(sorted(dehulud.BUILDS), [(1792504044, 220008448), (1793030166, 219996160)])
+        self.assertEqual(sorted(b["build"] for b in dehulud.BUILDS.values()), ["26083551", "26224975"])
+
+
+class BuildCurrent(GameTest):
+    extra = ("--build", "26224975")
+
+    def test_build_26224975_is_recognised(self):
+        self.assertEqual((self.game.build, self.game.timestamp, self.game.size), ("26224975", 1793030166, 219996160))
+        r = self.poll()
+        self.assertEqual((r.status, r.percent), ("on foot", 42))
+        self.assertEqual(self.meter.game[2]["build"], "26224975")
+        self.assertEqual(self.meter.reads, 1 + 8 + 21)  # header + 8 class slots + header start and the walk
+
+    def test_other_builds_slots_are_not_used(self):
+        # the image of one build must never be read with the other build's slot addresses
+        old = dehulud.BUILDS[(1792504044, 220008448)]
+        new = dehulud.BUILDS[(1793030166, 219996160)]
+        for key in ("gworld",) + dehulud.CLASS_SLOTS:
+            self.assertNotEqual(old[key], new[key], key)
+        self.poll()
+        self.assertIs(self.meter.game[2], new)
 
 
 class UnknownBuild(GameTest):
@@ -39,6 +60,7 @@ class UnknownBuild(GameTest):
         self.assertIn("1700000000", r.hint)
         self.assertIn("1700000000", r.detail)
         self.assertIn("26083551", r.detail)
+        self.assertIn("26224975", r.detail)
         self.assertEqual(self.meter.reads, 1)           # only the PE header was read
         self.assertIsNone(self.meter.game)
         self.assertIn("Unsupported game version", dehulud.format_line(r))
@@ -64,7 +86,7 @@ class ImageReplaced(GameTest):
 
     def test_exec_into_the_same_build_keeps_reading(self):
         self.assertEqual(self.poll().percent, 42)
-        self.game.exec_image(1792504044)
+        self.game.exec_image(self.game.timestamp)
         self.game.cmd("f char_comp 0x334 61")
         self.assertEqual((self.poll().status, self.poll().percent), ("on foot", 61))
 
@@ -312,6 +334,16 @@ class Permission(GameTest):
         self.assertIn("cannot be lowered while the system runs", texts[3])
         self.assertIn("could not be read", texts[None])         # a missing file does not prove there is no Yama
         self.assertNotIn("There is no Yama", texts[None])
+
+
+class ImageReplacedCurrentBuild(ImageReplaced):
+    """The same image checks on build 26224975's layout."""
+    extra = ("--fixed", "--build", "26224975")
+
+
+class RouteCurrentBuild(Route):
+    """Every route case again on build 26224975's layout (other slot addresses, the same members)."""
+    extra = ("--build", "26224975")
 
 
 class Quoting(unittest.TestCase):

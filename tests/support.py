@@ -12,7 +12,6 @@ sys.path.insert(0, ROOT)
 import dehulud  # noqa: E402
 
 EXE_PATH = "/games/DUNE Awakening/DuneSandbox/Binaries/Win64/DuneSandbox-Win64-Shipping.exe"
-IMAGE_SIZE = 220008448
 
 
 class FakeGame:
@@ -23,7 +22,8 @@ class FakeGame:
             [sys.executable, "-B", os.path.join(HERE, "fake_game.py"), "DuneSandbox-Win64-Shipping.exe"] + list(extra),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         info = json.loads(self.proc.stdout.readline())
-        self.pid, self.base, self.obj = self.proc.pid, info["base"], info["obj"]
+        self.pid, self.base, self.obj, self.size = self.proc.pid, info["base"], info["obj"], info["size"]
+        self.timestamp, self.build = info["timestamp"], info["build"]
 
     def cmd(self, line):
         self.proc.stdin.write(line + "\n")
@@ -82,7 +82,7 @@ class FakeSource(dehulud.ProcSource):
                 "%x-%x r--p 00000000 103:02 1234 %s\n"
                 "%x-%x rw-p 00000000 00:00 0 \n"
                 "7ffc00000000-7ffc00021000 rw-p 00000000 00:00 0 [stack]\n"
-                % (b, b + 0x1000, EXE_PATH, b + 0x1000, b + IMAGE_SIZE))
+                % (b, b + 0x1000, EXE_PATH, b + 0x1000, b + self.game.size))
 
     def ppid(self, pid):
         return self.fake_ppid if self.fake_ppid is not None else dehulud.ProcSource.ppid(self, pid)

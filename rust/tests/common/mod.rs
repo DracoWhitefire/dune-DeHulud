@@ -87,10 +87,19 @@ pub struct Fake {
     pub pid: i32,
     pub base: u64,
     pub obj: HashMap<String, u64>,
+    /// The fake image's SizeOfImage (it depends on the fake's --build).
+    pub size: u64,
     input: Option<File>,
     output: Receiver<String>,
     /// Started beside the binary: after it exits it stays a zombie until the binary exits.
     beside: bool,
+}
+
+fn parse_size(line: &str) -> u64 {
+    match json::parse(line).ok().and_then(|v| v.get("size").cloned()) {
+        Some(Value::Int(Some(n))) => n as u64,
+        _ => panic!("fake game said {line:?}"),
+    }
 }
 
 fn parse_info(line: &str) -> (u64, HashMap<String, u64>) {
@@ -300,6 +309,7 @@ impl Run {
             let output = line_channel(output);
             let first = output.recv_timeout(WAIT).expect("the fake game did not start");
             let (base, obj) = parse_info(&first);
+            let size = parse_size(&first);
             let deadline = Instant::now() + WAIT;
             let pid = loop {
                 if let Some(p) = fs::read_to_string(&pidf).ok().and_then(|s| s.trim().parse().ok()) {
@@ -308,7 +318,8 @@ impl Run {
                 assert!(Instant::now() < deadline, "no pid file");
                 std::thread::sleep(Duration::from_millis(5));
             };
-            run.fake = Some(Fake { pid, base, obj, input: Some(input), output, beside: o.start == Start::Beside });
+            run.fake =
+                Some(Fake { pid, base, obj, size, input: Some(input), output, beside: o.start == Start::Beside });
         }
         run
     }
@@ -316,8 +327,8 @@ impl Run {
     /// Points the binary's test source at the fake game (pid and image base), plus extra keys.
     pub fn attach(&mut self, extra: &[(&str, &str)]) {
         let f = self.fake.as_ref().unwrap();
-        let (pid, base) = (f.pid.to_string(), f.base.to_string());
-        let mut keys = vec![("pid", pid.as_str()), ("base", base.as_str())];
+        let (pid, base, size) = (f.pid.to_string(), f.base.to_string(), f.size.to_string());
+        let mut keys = vec![("pid", pid.as_str()), ("base", base.as_str()), ("size", size.as_str())];
         keys.extend_from_slice(extra);
         self.set(&keys);
     }

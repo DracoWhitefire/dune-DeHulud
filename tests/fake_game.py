@@ -1,10 +1,12 @@
 """Fake target for the DeHulud tests: a child process that lays out the threat route in its OWN memory.
 
-Run as: python3 fake_game.py DuneSandbox-Win64-Shipping.exe [--timestamp N] [--fixed]
+Run as: python3 fake_game.py DuneSandbox-Win64-Shipping.exe [--build B] [--timestamp N] [--fixed]
 (the exe name is an argument only so that the real /proc/<pid>/cmdline of this child matches).
 --fixed maps the image and the object arena at fixed addresses, so that an exec keeps them where they were.
 
-It prints one JSON line {"base": <image address>, "obj": {name: address}} and then obeys stdin lines:
+It prints one JSON line {"base": <image address>, "obj": {name: address}, "size": <SizeOfImage>, "timestamp": <TimeDateStamp>,
+"build": <id>}
+and then obeys stdin lines:
   f <obj> <offset> <value>   write a float32 at obj+offset (value may be nan / inf / -1)
   i <obj> <offset> <value>   write an int32
   p <obj> <offset> <target>  write a pointer to object <target> (or 0)
@@ -13,8 +15,9 @@ It prints one JSON line {"base": <image address>, "obj": {name: address}} and th
   exit                       exit (status 0)
 Each other command is answered with "ok". Only this process's own memory is ever written.
 
-The constants below are typed in independently of dehulud.py (from the static analysis of build
-26083551), so a wrong offset in dehulud.py cannot be hidden by the fake following it.
+The constants below are typed in independently of dehulud.py (from the static analysis of builds 26224975 and
+26083551), so a wrong offset in dehulud.py cannot be hidden by the fake following it. --build picks the image
+layout (default 26083551); the member offsets are the same in both builds.
 """
 import ctypes
 import json
@@ -23,17 +26,28 @@ import os
 import struct
 import sys
 
-SIZE_OF_IMAGE = 220008448          # PE SizeOfImage of build 26083551
-TIMESTAMP = 1792504044             # PE TimeDateStamp of build 26083551
-GWORLD = 0xC4CF528                 # GWorld slot RVA
-SLOTS = {"world": 0xC4CEF00,       # class slot RVAs: UWorld
-         "gi": 0xC49DBB0,          # UGameInstance
-         "lp": 0xC4AD730,          # ULocalPlayer
-         "pc": 0xC4BB0E8,          # APlayerController
-         "char": 0xC166430,        # ADuneCharacter
-         "pchar": 0xC16F290,       # ADunePlayerCharacter
-         "veh": 0xC1E3D68,         # ADuneVehicle
-         "comp": 0xC1D8BD8}        # USandwormThreatSourceComponent
+IMAGES = {   # build: (PE SizeOfImage, PE TimeDateStamp, GWorld slot RVA, class slot RVAs)
+    "26083551": (220008448, 1792504044, 0xC4CF528,
+                 {"world": 0xC4CEF00,       # class slot RVAs: UWorld
+                  "gi": 0xC49DBB0,          # UGameInstance
+                  "lp": 0xC4AD730,          # ULocalPlayer
+                  "pc": 0xC4BB0E8,          # APlayerController
+                  "char": 0xC166430,        # ADuneCharacter
+                  "pchar": 0xC16F290,       # ADunePlayerCharacter
+                  "veh": 0xC1E3D68,         # ADuneVehicle
+                  "comp": 0xC1D8BD8}),      # USandwormThreatSourceComponent
+    "26224975": (219996160, 1793030166, 0xC4CC568,
+                 {"world": 0xC4CBF40,
+                  "gi": 0xC49ABF0,
+                  "lp": 0xC4AA770,
+                  "pc": 0xC4B8128,
+                  "char": 0xC163440,
+                  "pchar": 0xC16C2A0,
+                  "veh": 0xC1E0D78,
+                  "comp": 0xC1D5BE8}),
+}
+BUILD = sys.argv[sys.argv.index("--build") + 1] if "--build" in sys.argv else "26083551"
+SIZE_OF_IMAGE, TIMESTAMP, GWORLD, SLOTS = IMAGES[BUILD]
 CLASS, SUPER = 0x10, 0x40          # UObject.ClassPrivate, UStruct.SuperStruct
 WORLD_GI, GI_LP, LP_PC = 0x3C8, 0x38, 0x30          # OwningGameInstance, LocalPlayers (TArray), PlayerController
 PC_PAWN, PC_ACK = 0x388, 0x3F0                      # Pawn, AcknowledgedPawn
@@ -113,14 +127,14 @@ def main(argv):
     put(obj["char2_comp"] + BLOB, "<f", 7.0)
     put(obj["char2_comp"] + THRESHOLD, "<f", 100.0)
 
-    print(json.dumps({"base": base, "obj": obj}), flush=True)
+    print(json.dumps({"base": base, "obj": obj, "size": SIZE_OF_IMAGE, "timestamp": stamp, "build": BUILD}), flush=True)
     for line in sys.stdin:
         cmd = line.split()
         if not cmd or cmd[0] == "exit":
             break
         if cmd[0] == "exec":                          # another image in this same process
-            os.execv(sys.executable, [sys.executable, "-B", os.path.abspath(__file__), argv[0], "--timestamp", cmd[1]]
-                     + (["--fixed"] if fixed else []))
+            os.execv(sys.executable, [sys.executable, "-B", os.path.abspath(__file__), argv[0], "--timestamp", cmd[1],
+                                      "--build", BUILD] + (["--fixed"] if fixed else []))
         op, where, off, value = cmd[0], obj[cmd[1]], int(cmd[2], 0), cmd[3]
         if op == "f":
             put(where + off, "<f", float(value))

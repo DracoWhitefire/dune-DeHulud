@@ -52,35 +52,65 @@ pub struct Build {
     pub threat_threshold: u64,
 }
 
-/// Builds table. Build 26083551: pe_timestamp 1792504044, size_of_image 220008448 (executable 214900656
-/// bytes).
-pub static BUILDS: &[Build] = &[Build {
-    build: "26083551",
-    pe_timestamp: 1792504044,
-    size_of_image: 220008448,
-    gworld: 0xC4CF528,                    // GWorld slot RVA (holds the UWorld*)
-    cls_world: 0xC4CEF00,                 // UWorld class slot RVA (holds the UClass*)
-    cls_game_instance: 0xC49DBB0,         // UGameInstance class slot RVA
-    cls_local_player: 0xC4AD730,          // ULocalPlayer class slot RVA
-    cls_player_controller: 0xC4BB0E8,     // APlayerController class slot RVA
-    cls_dune_character: 0xC166430,        // ADuneCharacter class slot RVA
-    cls_dune_player_character: 0xC16F290, // ADunePlayerCharacter class slot RVA
-    cls_dune_vehicle: 0xC1E3D68,          // ADuneVehicle class slot RVA
-    cls_threat_component: 0xC1D8BD8,      // USandwormThreatSourceComponent class slot RVA
-    class_private: 0x10,                  // UObject.ClassPrivate
-    super_struct: 0x40,                   // UStruct.SuperStruct
-    world_game_instance: 0x3C8,           // UWorld.OwningGameInstance
-    local_players: 0x38,                  // UGameInstance.LocalPlayers (TArray)
-    array_data: 0x0,                      // TArray.Data (element stride 8)
-    array_num: 0x8,                       // TArray.Num (i32)
-    player_controller: 0x30,              // ULocalPlayer.PlayerController
-    pawn: 0x388,                          // AController.Pawn (the possessed pawn: decides the route)
-    acknowledged_pawn: 0x3F0,             // APlayerController.AcknowledgedPawn (on foot: must equal Pawn)
-    character_threat: 0xE88,              // ADuneCharacter.m_SandwormThreatSourceComponent
-    vehicle_threat: 0xE08,                // ADuneVehicle.m_SandwormThreatSourceComponent
-    threat_blob: 0x334,                   // m_CurrentThreatBlobValue (f32)
-    threat_threshold: 0x348,              // m_CurrentSandwormAttackThreshold (f32)
-}];
+/// Builds table. Build 26224975: pe_timestamp 1793030166, size_of_image 219996160 (executable 214886832
+/// bytes). Build 26083551: pe_timestamp 1792504044, size_of_image 220008448 (executable 214900656 bytes).
+/// The member offsets are the same in both builds; the slot RVAs moved.
+pub static BUILDS: &[Build] = &[
+    Build {
+        build: "26224975",
+        pe_timestamp: 1793030166,
+        size_of_image: 219996160,
+        gworld: 0xC4CC568,                    // GWorld slot RVA (holds the UWorld*)
+        cls_world: 0xC4CBF40,                 // UWorld class slot RVA (holds the UClass*)
+        cls_game_instance: 0xC49ABF0,         // UGameInstance class slot RVA
+        cls_local_player: 0xC4AA770,          // ULocalPlayer class slot RVA
+        cls_player_controller: 0xC4B8128,     // APlayerController class slot RVA
+        cls_dune_character: 0xC163440,        // ADuneCharacter class slot RVA
+        cls_dune_player_character: 0xC16C2A0, // ADunePlayerCharacter class slot RVA
+        cls_dune_vehicle: 0xC1E0D78,          // ADuneVehicle class slot RVA
+        cls_threat_component: 0xC1D5BE8,      // USandwormThreatSourceComponent class slot RVA
+        class_private: 0x10,                  // UObject.ClassPrivate
+        super_struct: 0x40,                   // UStruct.SuperStruct
+        world_game_instance: 0x3C8,           // UWorld.OwningGameInstance
+        local_players: 0x38,                  // UGameInstance.LocalPlayers (TArray)
+        array_data: 0x0,                      // TArray.Data (element stride 8)
+        array_num: 0x8,                       // TArray.Num (i32)
+        player_controller: 0x30,              // ULocalPlayer.PlayerController
+        pawn: 0x388,                          // AController.Pawn (the possessed pawn: decides the route)
+        acknowledged_pawn: 0x3F0,             // APlayerController.AcknowledgedPawn (on foot: must equal Pawn)
+        character_threat: 0xE88,              // ADuneCharacter.m_SandwormThreatSourceComponent
+        vehicle_threat: 0xE08,                // ADuneVehicle.m_SandwormThreatSourceComponent
+        threat_blob: 0x334,                   // m_CurrentThreatBlobValue (f32)
+        threat_threshold: 0x348,              // m_CurrentSandwormAttackThreshold (f32)
+    },
+    Build {
+        build: "26083551",
+        pe_timestamp: 1792504044,
+        size_of_image: 220008448,
+        gworld: 0xC4CF528,                    // GWorld slot RVA (holds the UWorld*)
+        cls_world: 0xC4CEF00,                 // UWorld class slot RVA (holds the UClass*)
+        cls_game_instance: 0xC49DBB0,         // UGameInstance class slot RVA
+        cls_local_player: 0xC4AD730,          // ULocalPlayer class slot RVA
+        cls_player_controller: 0xC4BB0E8,     // APlayerController class slot RVA
+        cls_dune_character: 0xC166430,        // ADuneCharacter class slot RVA
+        cls_dune_player_character: 0xC16F290, // ADunePlayerCharacter class slot RVA
+        cls_dune_vehicle: 0xC1E3D68,          // ADuneVehicle class slot RVA
+        cls_threat_component: 0xC1D8BD8,      // USandwormThreatSourceComponent class slot RVA
+        class_private: 0x10,                  // UObject.ClassPrivate
+        super_struct: 0x40,                   // UStruct.SuperStruct
+        world_game_instance: 0x3C8,           // UWorld.OwningGameInstance
+        local_players: 0x38,                  // UGameInstance.LocalPlayers (TArray)
+        array_data: 0x0,                      // TArray.Data (element stride 8)
+        array_num: 0x8,                       // TArray.Num (i32)
+        player_controller: 0x30,              // ULocalPlayer.PlayerController
+        pawn: 0x388,                          // AController.Pawn (the possessed pawn: decides the route)
+        acknowledged_pawn: 0x3F0,             // APlayerController.AcknowledgedPawn (on foot: must equal Pawn)
+        character_threat: 0xE88,              // ADuneCharacter.m_SandwormThreatSourceComponent
+        vehicle_threat: 0xE08,                // ADuneVehicle.m_SandwormThreatSourceComponent
+        threat_blob: 0x334,                   // m_CurrentThreatBlobValue (f32)
+        threat_threshold: 0x348,              // m_CurrentSandwormAttackThreshold (f32)
+    },
+];
 
 // Class slots, in this order (index = bit in a hit mask).
 const WORLD: usize = 0;
@@ -901,8 +931,9 @@ pub(crate) mod tests {
     #[test]
     fn builds_table_identity() {
         let keys: Vec<(u32, u32)> = BUILDS.iter().map(|b| (b.pe_timestamp, b.size_of_image)).collect();
-        assert_eq!(keys, vec![(1792504044, 220008448)]);
-        assert_eq!(BUILDS[0].build, "26083551");
+        assert_eq!(keys, vec![(1793030166, 219996160), (1792504044, 220008448)]);
+        let names: Vec<&str> = BUILDS.iter().map(|b| b.build).collect();
+        assert_eq!(names, vec!["26224975", "26083551"]);
     }
 
     #[test]
@@ -1096,6 +1127,7 @@ pub(crate) mod tests {
         let r = m.poll();
         assert_eq!((r.status.as_str(), r.percent), ("Unsupported game version", None));
         assert!(r.hint.contains("1700000000") && r.detail.contains("1700000000") && r.detail.contains("26083551"));
+        assert!(r.detail.contains("26224975"), "{}", r.detail);
         assert!(r.detail.contains("(2023-11-14 22:13 UTC)"), "{}", r.detail);
         assert_eq!(m.reads, 1); // only the PE header was read
         assert_eq!(m.attached_build(), None);
