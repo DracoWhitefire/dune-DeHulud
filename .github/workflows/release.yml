@@ -1,0 +1,164 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+    working-directory: ./rust
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  check-branch:
+    name: Check tag is on main
+    # A dispatch against a branch (e.g. main) must not create a release.
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    outputs:
+      on_main: ${{ steps.check.outputs.on_main }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check tag is on main
+        id: check
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor ${{ github.sha }} origin/main; then
+            echo "on_main=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag is not on main — skipping publish."
+            echo "on_main=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check tag matches the crate version
+        run: |
+          CRATE_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$CRATE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CRATE_VERSION}."
+            exit 1
+          fi
+
+  verify:
+    name: Verify
+    needs: check-branch
+    if: needs.check-branch.outputs.on_main == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          targets: thumbv7em-none-eabi
+
+      - name: Cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+  create_release:
+    name: Create release
+    needs: [check-branch, verify]
+    if: needs.check-branch.outputs.on_main == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create GitHub release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl linker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build release binary
+        env:
+          BIN_NAME: dehulud
+          RUSTFLAGS: --remap-path-prefix=$HOME=~
+        run: |
+          cargo build --locked --release \
+            --target x86_64-unknown-linux-musl \
+            --bin "$BIN_NAME"
+
+      - name: Package binary
+        env:
+          BIN_NAME: dehulud
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          
+          BINARY="target/x86_64-unknown-linux-musl/release/$BIN_NAME"
+          
+          if [ ! -f "$BINARY" ]; then
+            echo "::error::Expected binary not found: $BINARY"
+            exit 1
+          fi
+          
+          ARCHIVE="$RUNNER_TEMP/dist/${BIN_NAME}-${TAG}-x86_64-unknown-linux-musl.tar.gz"
+          
+          tar -czf "$ARCHIVE" -C "$(dirname "$BINARY")" "$BIN_NAME"
+          
+          cd "$RUNNER_TEMP/dist"
+          sha256sum "$(basename "$ARCHIVE")" > SHA256SUMS
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          BIN_NAME: dehulud
+        run: |
+          ARCHIVE="$RUNNER_TEMP/dist/${BIN_NAME}-${TAG}-x86_64-unknown-linux-musl.tar.gz"
+          CHECKSUM="$RUNNER_TEMP/dist/SHA256SUMS"
+          
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — uploading assets."
+            gh release upload "$TAG" "$ARCHIVE" "$CHECKSUM" --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              "$ARCHIVE" \
+              "$CHECKSUM"
+          fi
