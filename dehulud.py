@@ -44,9 +44,36 @@ MENU_HINT = "right-click"  # window hint: the full message is in the right-click
 # Build 26083551: pe_timestamp 1792504044, size_of_image 220008448 (executable 214900656 bytes).
 # Offsets come from static analysis of each build's executable; each is commented with the game member it
 # reads. "rva" values are relative to the image base; the rest are member offsets (the same in all builds).
+# "damage" holds the offsets DeHulud Combat (dehulud_combat.py) reads for damage taken and damage dealt (None:
+# not known for that build); DeHulud itself never reads them.
 BUILDS = {
     (1793384724, 220024832): {
         "build": "26333948",
+        "damage": {
+            "attribute_set": 0x1400,       # ADuneCharacter.m_DuneCharacterAttributeSet
+            "health": 0x98,                # UDuneCharacterAttributeSet.CurrentHealth
+            "maximum": 0xC0,               # UDuneCharacterAttributeSet.MaxHealth
+            "power": 0x320,                # UDuneCharacterAttributeSet.CurrentPower
+            "payload": 0x18,               # FglGameplayAttributeData.CurrentValuePtr
+            "current": 0xC,                # FGameplayAttributeData.CurrentValue
+            "cls_attributes": 0xC146A88,   # UDuneCharacterAttributeSet class slot RVA
+            "cls_controller": 0xC175948,   # ADunePlayerController class slot RVA
+            "coordinator": 0x1048,         # ADunePlayerController.m_InventoryCoordinator
+            "owner": 0x268,                # UInventoryCoordinator.m_OwnerCharacter
+            "cls_coordinator": 0xC1CD1D8,  # UInventoryCoordinator class slot RVA
+            "aim": 0x1E58,                 # ADunePlayerCharacter.m_CachedAimTarget
+            "soft_lock": 0x1D80,           # ADunePlayerCharacter.m_SoftLockTarget
+            "weak_index": 0,               # FWeakObjectPtr.ObjectIndex
+            "weak_serial": 4,              # FWeakObjectPtr.ObjectSerialNumber
+            "chunks": 0xC337DC0,           # GUObjectArray.ObjObjects.Objects
+            "count": 0xC337DD4,            # GUObjectArray.ObjObjects.NumElements
+            "shift": 16,                   # FChunkedFixedUObjectArray chunk index shift
+            "stride": 24,                  # FUObjectItem stride
+            "item_object": 0,              # FUObjectItem.Object
+            "item_flags": 8,               # FUObjectItem.Flags
+            "item_serial": 16,             # FUObjectItem.SerialNumber
+            "reject_flags": 0x30200000,    # FUObjectItem.Flags weak reject mask
+        },
         "gworld": 0xC4D3528,                     # GWorld slot RVA (holds the UWorld*)
         "cls_world": 0xC4D2F00,                  # UWorld class slot RVA (holds the UClass*)
         "cls_game_instance": 0xC4A1BC0,          # UGameInstance class slot RVA
@@ -72,6 +99,7 @@ BUILDS = {
     },
     (1793030166, 219996160): {
         "build": "26224975",
+        "damage": None,
         "gworld": 0xC4CC568,                     # GWorld slot RVA (holds the UWorld*)
         "cls_world": 0xC4CBF40,                  # UWorld class slot RVA (holds the UClass*)
         "cls_game_instance": 0xC49ABF0,          # UGameInstance class slot RVA
@@ -97,6 +125,7 @@ BUILDS = {
     },
     (1792504044, 220008448): {
         "build": "26083551",
+        "damage": None,
         "gworld": 0xC4CF528,                     # GWorld slot RVA (holds the UWorld*)
         "cls_world": 0xC4CEF00,                  # UWorld class slot RVA (holds the UClass*)
         "cls_game_instance": 0xC49DBB0,          # UGameInstance class slot RVA
@@ -240,13 +269,14 @@ def reading_for(mode, blob, threshold):
     return Reading(mode, percent, min(1.0, max(0.0, blob / threshold)))
 
 
-def launch_option():
-    """The Steam launch option for this file. The path is quoted for the shell: a path with a space or a quote
-    in it would otherwise be split into several words and the game would not start."""
-    return shlex.quote(os.path.realpath(__file__)) + " --launch %command%"
+def launch_option(program=None):
+    """The Steam launch option for this file (or `program`, DeHulud Combat's file). The path is quoted for the
+    shell: a path with a space or a quote in it would otherwise be split into several words and the game would
+    not start."""
+    return shlex.quote(program or os.path.realpath(__file__)) + " --launch %command%"
 
 
-def permission_help(scope, launched):
+def permission_help(scope, launched, program=None):
     """The exact fix for the user's ptrace_scope value (kernel.yama.ptrace_scope). Yama's values: 0 adds no
     restriction of its own (the normal same-user rules still apply), 1 allows a program to read only its own
     descendants, 2 only programs with CAP_SYS_PTRACE, 3 nobody, and 3 cannot be lowered until a reboot."""
@@ -268,11 +298,11 @@ def permission_help(scope, launched):
                "       %s\n"
                "  2. Allow it until the next reboot:  sudo sysctl kernel.yama.ptrace_scope=0\n"
                "     (trade-off: then every program running as your user can read your other programs)"
-               % launch_option())
+               % launch_option(program))
     elif scope == 2:
         fix = ("With 2 only a program with the CAP_SYS_PTRACE capability (normally only root) may read another "
                "program. Lower it to 1 and use the Steam launch option (%s), or to 0:\n"
-               "  sudo sysctl kernel.yama.ptrace_scope=1" % launch_option())
+               "  sudo sysctl kernel.yama.ptrace_scope=1" % launch_option(program))
     elif scope == 3:
         fix = ("With 3 reading other programs is switched off, and 3 cannot be lowered while the system runs. "
                "Change kernel.yama.ptrace_scope in the file under /etc/sysctl.d/ that sets 3, then reboot.")
@@ -283,7 +313,7 @@ def permission_help(scope, launched):
     return head + fix + "\nDetails: README.md, 'Before you start: permission to read the game'."
 
 
-def outside_launch_help(pid, scope):
+def outside_launch_help(pid, scope, program=None):
     """--launch mode, but the game is not a descendant of DeHulud: what works for this ptrace_scope value."""
     head = ("Steam started the game outside DeHulud (pid %d is not a descendant of this --launch DeHulud), so the "
             "launch option cannot help, and ptrace_scope is %s.\n" % (pid, scope))
@@ -299,7 +329,7 @@ def outside_launch_help(pid, scope):
     return head + why + ("What works: allow reading with\n"
                          "  sudo sysctl kernel.yama.ptrace_scope=0      (until the next reboot)\n"
                          "then remove the launch option in Steam and start DeHulud by itself:  %s\n%s"
-                         % (shlex.quote(os.path.realpath(__file__)), trade))
+                         % (shlex.quote(program or os.path.realpath(__file__)), trade))
 
 
 OUTSIDE = "DeHulud found the game outside --launch; reading it anyway (pid %d, ptrace_scope %s)."
@@ -313,6 +343,7 @@ class _Soft(Exception):
 
 class Meter:
     """Finds the game, identifies its build and walks the threat route once per poll()."""
+    program = None          # the file the help texts name (None: this one)
 
     def __init__(self, source=None, reader_factory=Reader, launched=False, scan_interval=SCAN_S,
                  clock=time.monotonic):
@@ -385,8 +416,8 @@ class Meter:
             # read would be refused, so nothing is read and the message says what works for that value.
             scope = src.ptrace_scope()
             if scope not in (0, None):
-                return Reading("not started by --launch", detail=outside_launch_help(foreign[0][0], scope),
-                               hint=MENU_HINT)
+                return Reading("not started by --launch",
+                               detail=outside_launch_help(foreign[0][0], scope, self.program), hint=MENU_HINT)
             found, self.note = foreign, OUTSIDE % (foreign[0][0], "0" if scope == 0 else "not readable")
         if not found:
             return Reading("waiting for game")
@@ -413,7 +444,8 @@ class Meter:
     def _failed(self, e):
         if e.errno in (errno.EPERM, errno.EACCES):
             self.game = None
-            return Reading("no permission", detail=permission_help(self.source.ptrace_scope(), self.launched),
+            return Reading("no permission",
+                           detail=permission_help(self.source.ptrace_scope(), self.launched, self.program),
                            hint=MENU_HINT)
         if e.errno == errno.ESRCH:
             self.game, self.next_scan = None, 0.0
@@ -441,6 +473,10 @@ class Meter:
         if not same:
             self.game, self.next_scan = None, 0.0
             return None
+        return self._read(base, b, r, slots)
+
+    def _read(self, base, b, r, slots):
+        """What one poll reads from the identified image: the threat route (DeHulud Combat adds its sections)."""
         try:
             return self._route(base, b, r, slots)
         except _Soft as s:
@@ -563,7 +599,7 @@ def bar_color(fraction):
 DEFAULTS = {"x": None, "y": None, "frame": False}
 
 
-def config_path(env=None):
+def config_path(env=None, folder="dehulud"):
     """$XDG_CONFIG_HOME/dehulud/config.json; $HOME/.config when XDG_CONFIG_HOME is unset or not absolute. None
     when neither is known: the window then keeps no position. There is deliberately no password-database
     fallback (os.path.expanduser does one without HOME): that lookup can ask a local name service over a
@@ -575,12 +611,12 @@ def config_path(env=None):
         if home is None:
             return None
         base = os.path.join(home.rstrip("/") or "/", ".config")
-    return os.path.join(base, "dehulud", "config.json")
+    return os.path.join(base, folder, "config.json")
 
 
-def load_config(path):
+def load_config(path, defaults=DEFAULTS):
     """Window position and frame flag; anything missing or malformed falls back to the defaults."""
-    cfg = dict(DEFAULTS)
+    cfg = dict(defaults)
     if path is None:
         return cfg
     try:
@@ -593,18 +629,19 @@ def load_config(path):
             v = data.get(k)
             if isinstance(v, int) and not isinstance(v, bool) and -100000 < v < 100000:
                 cfg[k] = v
-        if isinstance(data.get("frame"), bool):
-            cfg["frame"] = data["frame"]
+        for k, v in defaults.items():                 # the frame flag (and DeHulud Combat's switches)
+            if isinstance(v, bool) and isinstance(data.get(k), bool):
+                cfg[k] = data[k]
     return cfg
 
 
-def save_config(path, cfg):
+def save_config(path, cfg, defaults=DEFAULTS):
     if path is None:
         return False
     try:
         os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
         with open(path + ".tmp", "w", encoding="utf-8") as f:
-            json.dump({k: cfg.get(k, DEFAULTS[k]) for k in DEFAULTS}, f)
+            json.dump({k: cfg.get(k, defaults[k]) for k in defaults}, f)
         os.replace(path + ".tmp", path)
         return True
     except (OSError, TypeError, ValueError):

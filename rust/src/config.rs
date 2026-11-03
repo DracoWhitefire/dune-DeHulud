@@ -31,11 +31,16 @@ pub fn home() -> Option<PathBuf> {
 /// `$XDG_CONFIG_HOME/dehulud/config.json`; ~/.config when XDG_CONFIG_HOME is unset or not absolute. None when
 /// neither an absolute XDG_CONFIG_HOME nor a home folder is known: the window then keeps no position.
 pub fn config_path_from(xdg: Option<&OsStr>, home: Option<&Path>) -> Option<PathBuf> {
+    config_path_in("dehulud", xdg, home)
+}
+
+/// `config.json` in the folder `folder` of the config base, by the same rules (DeHulud Combat has its own).
+pub fn config_path_in(folder: &str, xdg: Option<&OsStr>, home: Option<&Path>) -> Option<PathBuf> {
     let base = match xdg {
         Some(x) if Path::new(x).is_absolute() => PathBuf::from(x),
         _ => home?.join(".config"),
     };
-    Some(base.join("dehulud").join("config.json"))
+    Some(base.join(folder).join("config.json"))
 }
 
 pub fn config_path() -> Option<PathBuf> {
@@ -70,6 +75,11 @@ pub fn to_json(cfg: &Config) -> String {
 
 /// Writes the config atomically (a temporary file renamed over the old one); false when that fails.
 pub fn save_config(path: &Path, cfg: &Config) -> bool {
+    save_text(path, &to_json(cfg))
+}
+
+/// Writes a config file's text atomically, creating its folder with mode 0700; false when that fails.
+pub fn save_text(path: &Path, text: &str) -> bool {
     let Some(dir) = path.parent() else { return false };
     // like Python's os.makedirs(dir, mode=0o700, exist_ok=True): only the last folder gets mode 0700
     if let Some(up) = dir.parent() {
@@ -82,7 +92,7 @@ pub fn save_config(path: &Path, cfg: &Config) -> bool {
     }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
-    fs::write(&tmp, to_json(cfg)).is_ok() && fs::rename(&tmp, path).is_ok()
+    fs::write(&tmp, text).is_ok() && fs::rename(&tmp, path).is_ok()
 }
 
 /// One monitor of the X screen.

@@ -81,14 +81,19 @@ def region(size, at=None):
 
 
 def main(argv):
+    # Optional synthetic damage arena; existing threat addresses and commands stay unchanged.
+    from damage_model import DamageModel
+    bound_damage = "--damage" in argv and BUILD == "26333948"
+    damage = DamageModel() if "--damage" in argv and not bound_damage else None
     stamp = int(argv[argv.index("--timestamp") + 1]) if "--timestamp" in argv else TIMESTAMP
     fixed = "--fixed" in argv
     image, base = region(SIZE_OF_IMAGE, FIXED_IMAGE if fixed else None)
-    arena, heap = region(64 * 0x1000, FIXED_ARENA if fixed else None)
+    object_stride = 0x3000 if bound_damage else 0x1000
+    arena, heap = region(64 * object_stride, FIXED_ARENA if fixed else None)
     names = ["c_world", "c_gi", "c_bp_gi", "c_lp", "c_pc", "c_dune_pc", "c_bp_pc", "c_char", "c_pchar",
              "c_bp_char", "c_veh", "c_wheeled", "c_bp_bike", "c_comp", "c_bogus", "world", "gi", "lp_array",
              "lp", "pc", "char", "char_comp", "veh", "veh_comp", "bogus", "char2", "char2_comp"]
-    obj = {n: heap + 0x1000 * i for i, n in enumerate(names)}
+    obj = {n: heap + object_stride * i for i, n in enumerate(names)}
 
     def put(addr, fmt, value):
         mem = image if base <= addr < base + SIZE_OF_IMAGE else arena
@@ -136,14 +141,62 @@ def main(argv):
     put(obj["char2_comp"] + BLOB, "<f", 7.0)
     put(obj["char2_comp"] + THRESHOLD, "<f", 100.0)
 
-    print(json.dumps({"base": base, "obj": obj, "size": SIZE_OF_IMAGE, "timestamp": stamp, "build": BUILD}), flush=True)
+    image_mappings = [image]
+
+    def read_external(address, size):
+        for memory, start in ((image, base), (arena, heap)):
+            if start <= address and address + size <= start + len(memory):
+                return bytes(memory[address - start:address - start + size])
+        raise ValueError("outside fake game mappings")
+
+    def remap_image():
+        nonlocal image, base
+        new_image, new_base = region(SIZE_OF_IMAGE)
+        new_image[:0x400] = image[:0x400]
+        # Invalidate the old PE identity so an attached reader really reattaches.
+        struct.pack_into("<I", image, 0x88, 0)
+        image, base = new_image, new_base
+        image_mappings.append(image)
+        for key, cls in (("world", "c_world"), ("gi", "c_gi"), ("lp", "c_lp"), ("pc", "c_pc"),
+                         ("char", "c_char"), ("pchar", "c_pchar"), ("veh", "c_veh"), ("comp", "c_comp")):
+            put(base + SLOTS[key], "<Q", obj[cls])
+        return base
+
+    if bound_damage:
+        from damage_build import BoundDamageModel
+        damage = BoundDamageModel(base, obj, put, read_external, remap_image)
+
+    if damage is not None:
+        damage.worm_ranges = [(obj[name] + field, obj[name] + field + 4)
+                              for name in ("char_comp", "veh_comp", "char2_comp")
+                              for field in (BLOB, THRESHOLD)]
+
+    info = {"base": base, "obj": obj, "size": SIZE_OF_IMAGE, "timestamp": stamp, "build": BUILD}
+    if damage is not None:
+        info["damage"] = damage.info()
+    print(json.dumps(info), flush=True)
     for line in sys.stdin:
         cmd = line.split()
         if not cmd or cmd[0] == "exit":
             break
+        if cmd[0] == "damage":
+            frame = json.loads(line.split(" ", 1)[1])
+            if damage is None:
+                reply = {"error": "damage arena not enabled"}
+            elif not bound_damage and ("world" in frame or "image" in frame):
+                reply = {"error": "unbound identity: use threat pointer/PE commands until route binding"}
+            else:
+                damage.apply(frame)
+                reply = {"damage": damage.info()}
+            print(json.dumps(reply), flush=True)
+            continue
+        if cmd[0] == "damage-info":
+            print(json.dumps(damage.info()), flush=True)
+            continue
         if cmd[0] == "exec":                          # another image in this same process
             os.execv(sys.executable, [sys.executable, "-B", os.path.abspath(__file__), argv[0], "--timestamp", cmd[1],
-                                      "--build", BUILD] + (["--fixed"] if fixed else []))
+                                      "--build", BUILD] + (["--fixed"] if fixed else []) +
+                                      (["--damage"] if damage is not None else []))
         op, where, off, value = cmd[0], obj[cmd[1]], int(cmd[2], 0), cmd[3]
         if op == "f":
             put(where + off, "<f", float(value))

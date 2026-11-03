@@ -2,6 +2,7 @@
 
 use crate::help;
 use crate::procfs::{self, Memory, Source};
+use crate::sections::{Feature, Features};
 use std::time::{Duration, Instant};
 
 pub const APP: &str = "DeHulud";
@@ -25,6 +26,7 @@ pub const MENU_HINT: &str = "right-click";
 /// member it reads. RVA values are relative to the image base; the rest are member offsets.
 #[derive(Debug)]
 pub struct Build {
+    pub damage: Option<&'static crate::damage::Layout>,
     pub build: &'static str,
     pub pe_timestamp: u32,
     pub size_of_image: u32,
@@ -59,6 +61,7 @@ pub struct Build {
 pub static BUILDS: &[Build] = &[
     Build {
         build: "26333948",
+        damage: Some(&crate::damage::BUILD_26333948),
         pe_timestamp: 1793384724,
         size_of_image: 220024832,
         gworld: 0xC4D3528,                    // GWorld slot RVA (holds the UWorld*)
@@ -86,6 +89,7 @@ pub static BUILDS: &[Build] = &[
     },
     Build {
         build: "26224975",
+        damage: None,
         pe_timestamp: 1793030166,
         size_of_image: 219996160,
         gworld: 0xC4CC568,                    // GWorld slot RVA (holds the UWorld*)
@@ -113,6 +117,7 @@ pub static BUILDS: &[Build] = &[
     },
     Build {
         build: "26083551",
+        damage: None,
         pe_timestamp: 1792504044,
         size_of_image: 220008448,
         gworld: 0xC4CF528,                    // GWorld slot RVA (holds the UWorld*)
@@ -173,6 +178,12 @@ pub fn find_build(ident: (u32, u32)) -> Option<&'static Build> {
 }
 
 /// One poll: `percent`/`fraction` are None whenever the meter must show '-'.
+///
+/// `taken` and `dealt` are what the poll hands the two damage sections of the window: None for a section the
+/// poll did not read, and whenever nothing trustworthy was read (the section then shows '-'); otherwise the
+/// drops emitted in this poll: at most one non-negative number for damage taken, at most one health and one
+/// shield number for damage dealt. When a number is emitted is the reader's business; ages, history, fading and
+/// capping are the window's ([`crate::sections`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reading {
     pub status: String,
@@ -180,11 +191,21 @@ pub struct Reading {
     pub fraction: Option<f64>,
     pub detail: String,
     pub hint: String,
+    pub taken: Option<Option<f64>>,
+    pub dealt: Option<(Option<f64>, Option<f64>)>,
 }
 
 impl Reading {
     pub fn new(status: impl Into<String>) -> Self {
-        Reading { status: status.into(), percent: None, fraction: None, detail: String::new(), hint: String::new() }
+        Reading {
+            status: status.into(),
+            percent: None,
+            fraction: None,
+            detail: String::new(),
+            hint: String::new(),
+            taken: None,
+            dealt: None,
+        }
     }
 
     pub fn with(status: impl Into<String>, detail: impl Into<String>, hint: impl Into<String>) -> Self {
@@ -198,7 +219,60 @@ impl Reading {
 
 /// Anything that produces one reading per poll (the meter, or a scripted one in tests).
 pub trait Poll {
-    fn poll(&mut self) -> Reading;
+    /// One poll of the sections in `enabled`: a section that is not in it is not read at all.
+    fn poll_enabled(&mut self, enabled: Features) -> Reading;
+
+    /// One poll of every section.
+    fn poll(&mut self) -> Reading {
+        self.poll_enabled(Features::ALL)
+    }
+
+    /// A header switch was clicked: whatever was kept for that feature is forgotten (see [`Damage::reset`]).
+    fn reset(&mut self, _f: Feature) {}
+}
+
+/// The attached game as the damage readers get it.
+pub struct Attached<'a> {
+    pub mem: &'a mut dyn Memory,
+    pub base: u64,
+    pub build: &'static Build,
+}
+
+/// The damage readers of the meter: what one poll reads for each damage section of the window.
+///
+/// The meter calls `taken` only while the Damage taken section is on, `dealt` only while Damage dealt is on, and
+/// `mode` (the status line, e.g. "on foot") only while the worm meter, which otherwise names the state, is off
+/// and a damage section is on. Each gets the attached game once per poll and returns the shape documented on
+/// [`Reading`] (None: nothing trustworthy, '-').
+///
+/// Two hooks, no-ops by default, neither with a memory handle (they cannot read):
+/// - `begin(now, enabled, image)`: once per poll, before mode/taken/dealt, only while the game is attached and at
+///   least one damage section is on. `now`: monotonic time of the poll; `enabled`: the poll's set; `image`: the
+///   attachment serial, a number that changes with every new attachment (a restarted game, or an exec under the
+///   same pid into an image with another PE identity) and stays the same while the meter stays attached.
+/// - `reset(f)`: on every click on a header switch (any of the three features), also when a section goes off and
+///   on again with no poll between; never for the flags at startup.
+pub trait Damage {
+    fn taken(&mut self, game: &mut Attached) -> Option<Option<f64>>;
+    fn dealt(&mut self, game: &mut Attached) -> Option<(Option<f64>, Option<f64>)>;
+    fn mode(&mut self, game: &mut Attached) -> Option<String>;
+    fn begin(&mut self, _now: Instant, _enabled: Features, _image: u64) {}
+    fn reset(&mut self, _f: Feature) {}
+}
+
+/// Stand-ins that read nothing: every damage section shows '-' until readers for the game's values exist.
+pub struct NoDamage;
+
+impl Damage for NoDamage {
+    fn taken(&mut self, _: &mut Attached) -> Option<Option<f64>> {
+        None
+    }
+    fn dealt(&mut self, _: &mut Attached) -> Option<(Option<f64>, Option<f64>)> {
+        None
+    }
+    fn mode(&mut self, _: &mut Attached) -> Option<String> {
+        None
+    }
 }
 
 /// (address, path) of the lowest mapping of a file named EXE at file offset 0, or None.
@@ -310,9 +384,13 @@ enum Walk {
 
 pub type ReaderFactory = Box<dyn FnMut(i32) -> Box<dyn Memory>>;
 
-/// Finds the game, identifies its build and walks the threat route once per [`Poll::poll`].
+/// Finds the game, identifies its build and, once per [`Poll::poll_enabled`], walks the route of each enabled
+/// section: the threat route for the worm meter (unchanged), the damage readers for the damage sections. A
+/// section that is not enabled is not read at all; with nothing enabled the poll reads nothing.
 pub struct Meter {
+    clock: Box<dyn FnMut() -> Instant>,
     source: Box<dyn Source>,
+    damage: Box<dyn Damage>,
     reader_factory: ReaderFactory,
     pub launched: bool,
     scan_interval: Duration,
@@ -324,6 +402,8 @@ pub struct Meter {
     pub reads: u64,
     last: Reading,
     me: (i32, u32),
+    /// Attachment serial, handed to the damage readers' `begin`.
+    image: u64,
 }
 
 impl Meter {
@@ -334,7 +414,9 @@ impl Meter {
         scan_interval: Duration,
     ) -> Self {
         Meter {
+            clock: Box::new(crate::testhook::now),
             source,
+            damage: Box::new(NoDamage),
             reader_factory,
             launched,
             scan_interval,
@@ -344,10 +426,11 @@ impl Meter {
             reads: 0,
             last: Reading::new("waiting for game"),
             me: procfs::me(),
+            image: 0,
         }
     }
 
-    /// The meter of a normal run: the real /proc and process_vm_readv.
+    /// The meter of a normal run of DeHulud: the real /proc and process_vm_readv, no damage readers.
     pub fn real(launched: bool) -> Self {
         Meter::new(
             Box::new(procfs::ProcSource),
@@ -357,13 +440,33 @@ impl Meter {
         )
     }
 
+    /// The meter of a normal run of DeHulud Combat: the same, with the damage readers.
+    pub fn combat(launched: bool) -> Self {
+        Meter::real(launched).with_damage(Box::new(crate::damage::DamageReader::default()))
+    }
+
+    /// The same meter with these damage readers.
+    pub fn with_damage(mut self, damage: Box<dyn Damage>) -> Self {
+        self.damage = damage;
+        self
+    }
+
+    /// A monotonic poll clock; tests can step it without sleeping.
+    pub fn with_clock(mut self, clock: Box<dyn FnMut() -> Instant>) -> Self {
+        self.clock = clock;
+        self
+    }
+
     /// The build of the attached game, if any.
     pub fn attached_build(&self) -> Option<&'static str> {
         self.game.as_ref().map(|g| g.build.build)
     }
 
-    fn poll_inner(&mut self) -> Reading {
+    fn poll_inner(&mut self, enabled: Features) -> Reading {
         self.reads = 0;
+        if !enabled.any() {
+            return Reading::new(""); // every section off: no reads at all
+        }
         if self.game.is_none() && self.next_scan.is_some_and(|t| Instant::now() < t) {
             return self.last.clone();
         }
@@ -378,7 +481,7 @@ impl Meter {
             }
             let g = self.game.as_mut().expect("attached");
             let start = g.reader.count();
-            let out = walk(&*self.source, g);
+            let out = walk(&*self.source, g, enabled, &mut *self.damage, self.image, (self.clock)());
             self.reads += g.reader.count() - start;
             match out {
                 Walk::Done(r) => {
@@ -492,6 +595,7 @@ impl Meter {
         };
         let span = u32_at(&head, 0x3C) as usize + 0x58; // e_lfanew + what pe_identity checks
         self.game = Some(Game { pid, base, build, reader, slots: None, ident, span });
+        self.image += 1;
         None
     }
 
@@ -514,8 +618,12 @@ impl Meter {
 }
 
 impl Poll for Meter {
-    fn poll(&mut self) -> Reading {
-        let mut r = self.poll_inner();
+    fn reset(&mut self, f: Feature) {
+        self.damage.reset(f);
+    }
+
+    fn poll_enabled(&mut self, enabled: Features) -> Reading {
+        let mut r = self.poll_inner(enabled);
         if !self.note.is_empty() && self.game.is_some() && r.detail.is_empty() {
             r.detail = self.note.clone();
         }
@@ -528,7 +636,14 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 /// One poll of the attached game.
-fn walk(source: &dyn Source, g: &mut Game) -> Walk {
+fn walk(
+    source: &dyn Source,
+    g: &mut Game,
+    enabled: Features,
+    damage: &mut dyn Damage,
+    image: u64,
+    now: Instant,
+) -> Walk {
     let alive = source.cmdline(g.pid).is_ok_and(|c| contains(&c, EXE.as_bytes())); // exited, reaped or pid reused
     if !alive {
         return Walk::Failed(libc::ESRCH);
@@ -544,11 +659,33 @@ fn walk(source: &dyn Source, g: &mut Game) -> Walk {
     if !same {
         return Walk::Replaced;
     }
-    match route(&mut *g.reader, g.base, g.build, &mut g.slots) {
-        Ok(r) => Walk::Done(r),
-        Err(Fail::Soft(status)) => Walk::Done(Reading::new(status)),
-        Err(Fail::Os(code)) => Walk::Failed(code),
+    let worm = if enabled.worm {
+        match route(&mut *g.reader, g.base, g.build, &mut g.slots) {
+            Ok(r) => Some(r),
+            Err(Fail::Soft(status)) => Some(Reading::new(status)),
+            // refused or gone: detach, nothing more to read; any other failed read is '-' for the worm only
+            Err(Fail::Os(code)) if code == libc::EPERM || code == libc::EACCES || code == libc::ESRCH => {
+                return Walk::Failed(code);
+            }
+            Err(Fail::Os(_)) => Some(Reading::new("no data")),
+        }
+    } else {
+        None
+    };
+    let mut game = Attached { mem: &mut *g.reader, base: g.base, build: g.build };
+    if enabled.taken || enabled.dealt {
+        damage.begin(now, enabled, image);
     }
+    let mut r = match worm {
+        Some(r) => r,
+        None => {
+            let mode = if enabled.taken || enabled.dealt { damage.mode(&mut game) } else { None };
+            Reading::new(mode.unwrap_or_else(|| "no data".into()))
+        }
+    };
+    r.taken = if enabled.taken { damage.taken(&mut game) } else { None };
+    r.dealt = if enabled.dealt { damage.dealt(&mut game) } else { None };
+    Walk::Done(r)
 }
 
 /// The route of one poll over the attached image (`slots` are its class pointers).
@@ -679,6 +816,7 @@ pub(crate) mod tests {
     //! The route against an in-memory fake of the game's object graph (the same layout as the fake game
     //! process used by the integration tests), so each rule is checked without any other process.
     use super::*;
+    use crate::sections::{Feature, Features};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::io;
@@ -974,6 +1112,148 @@ pub(crate) mod tests {
         assert_eq!(m.reads, 1 + 8 + 21); // header + 8 class slots + header start and the walk
         assert_eq!(m.poll().percent, Some(42));
         assert_eq!(m.reads, 21);
+    }
+
+    /// A damage source standing in for the readers: scripted values, every call logged.
+    struct Stub {
+        calls: Rc<RefCell<Vec<&'static str>>>,
+        mode: Option<String>,
+        taken: Option<Option<f64>>,
+    }
+
+    impl Damage for Stub {
+        fn taken(&mut self, g: &mut Attached) -> Option<Option<f64>> {
+            assert_eq!(g.base, BASE);
+            self.calls.borrow_mut().push("taken");
+            self.taken
+        }
+        fn dealt(&mut self, _: &mut Attached) -> Option<(Option<f64>, Option<f64>)> {
+            self.calls.borrow_mut().push("dealt");
+            Some((Some(120.0), Some(40.0)))
+        }
+        fn mode(&mut self, _: &mut Attached) -> Option<String> {
+            self.calls.borrow_mut().push("mode");
+            self.mode.clone()
+        }
+    }
+
+    fn with_stub(mode: Option<&str>) -> (World, Meter, Rc<RefCell<Vec<&'static str>>>) {
+        let (w, m) = setup();
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let stub = Stub { calls: calls.clone(), mode: mode.map(String::from), taken: Some(Some(37.0)) };
+        let mut m = m.with_damage(Box::new(stub));
+        m.poll(); // attach and read the class slots once
+        calls.borrow_mut().clear();
+        (w, m, calls)
+    }
+
+    #[test]
+    fn a_section_that_is_off_is_not_read() {
+        let (_w, mut m, calls) = with_stub(Some("on foot"));
+        let r = m.poll_enabled(Features::ALL);
+        assert_eq!((r.percent, r.taken, r.dealt), (Some(42), Some(Some(37.0)), Some((Some(120.0), Some(40.0)))));
+        assert_eq!((m.reads, calls.borrow().clone()), (21, vec!["taken", "dealt"]));
+        calls.borrow_mut().clear();
+        // worm off: the worm route is not walked, only the image check reads memory
+        let r = m.poll_enabled(Features { worm: false, ..Features::ALL });
+        assert_eq!((r.status.as_str(), r.percent, r.taken), ("on foot", None, Some(Some(37.0))));
+        assert_eq!((m.reads, calls.borrow().clone()), (1, vec!["mode", "taken", "dealt"]));
+        calls.borrow_mut().clear();
+        // worm only: unchanged, the damage readers are not called
+        let r = m.poll_enabled(Features::TEXT);
+        assert_eq!((r.status.as_str(), r.percent, r.taken, r.dealt), ("on foot", Some(42), None, None));
+        assert_eq!((m.reads, calls.borrow().len()), (21, 0));
+        for (on, want) in [
+            (Features { taken: true, ..Features::NONE }, vec!["mode", "taken"]),
+            (Features { dealt: true, ..Features::NONE }, vec!["mode", "dealt"]),
+            (Features::NONE, vec![]),
+        ] {
+            calls.borrow_mut().clear();
+            let r = m.poll_enabled(on);
+            assert_eq!(calls.borrow().clone(), want, "{on:?}");
+            assert_eq!((r.taken.is_some(), r.dealt.is_some()), (on.taken, on.dealt));
+        }
+        assert_eq!(m.reads, 0, "every section off: no reads at all");
+    }
+
+    /// Logs the two hooks with their arguments, and the reader calls between them.
+    #[derive(Default)]
+    struct Hooks {
+        log: Rc<RefCell<Vec<String>>>,
+        times: Rc<RefCell<Vec<Instant>>>,
+    }
+
+    impl Damage for Hooks {
+        fn taken(&mut self, _: &mut Attached) -> Option<Option<f64>> {
+            self.log.borrow_mut().push("taken".into());
+            Some(None)
+        }
+        fn dealt(&mut self, _: &mut Attached) -> Option<(Option<f64>, Option<f64>)> {
+            self.log.borrow_mut().push("dealt".into());
+            Some((None, None))
+        }
+        fn mode(&mut self, _: &mut Attached) -> Option<String> {
+            self.log.borrow_mut().push("mode".into());
+            None
+        }
+        fn begin(&mut self, now: Instant, enabled: Features, image: u64) {
+            self.times.borrow_mut().push(now);
+            self.log.borrow_mut().push(format!("begin {} {image}", enabled.keys().join("+")));
+        }
+        fn reset(&mut self, f: Feature) {
+            self.log.borrow_mut().push(format!("reset {}", f.key()));
+        }
+    }
+
+    #[test]
+    fn begin_once_per_poll_before_the_readers_and_reset_forwarded() {
+        let (w, m) = setup();
+        let (log, times) = (Rc::new(RefCell::new(Vec::new())), Rc::new(RefCell::new(Vec::new())));
+        let mut m = m.with_damage(Box::new(Hooks { log: log.clone(), times: times.clone() }));
+        let take = || std::mem::take(&mut *log.borrow_mut());
+        m.poll_enabled(Features::ALL);
+        assert_eq!(take(), ["begin worm+damage_taken+damage_dealt 1", "taken", "dealt"]);
+        m.poll_enabled(Features { worm: false, ..Features::ALL });
+        assert_eq!(take(), ["begin damage_taken+damage_dealt 1", "mode", "taken", "dealt"]);
+        m.poll_enabled(Features { taken: true, ..Features::NONE });
+        assert_eq!(take(), ["begin damage_taken 1", "mode", "taken"]);
+        // no damage section on, or nothing at all: no begin
+        m.poll_enabled(Features::TEXT);
+        m.poll_enabled(Features::NONE);
+        assert!(take().is_empty());
+        let t = times.borrow().clone();
+        assert!(t.windows(2).all(|p| p[0] <= p[1]), "monotonic");
+        // not attached (an unknown image): no begin; attached again: a new serial
+        w.set_timestamp(1700000000);
+        assert_eq!(m.poll().status, "Unsupported game version");
+        assert!(take().is_empty());
+        w.set_timestamp(TS);
+        m.poll();
+        assert_eq!(take(), ["begin worm+damage_taken+damage_dealt 2", "taken", "dealt"]);
+        // the window's clicks reach the readers through Poll::reset
+        for f in Feature::ALL {
+            Poll::reset(&mut m, f);
+        }
+        assert_eq!(take(), ["reset worm", "reset damage_taken", "reset damage_dealt"]);
+    }
+
+    #[test]
+    fn worm_off_without_a_mode_says_no_data() {
+        let (_w, mut m, _) = with_stub(None);
+        assert_eq!(m.poll_enabled(Features { taken: true, ..Features::NONE }).status, "no data");
+    }
+
+    #[test]
+    fn default_readers_show_dash_and_unsupported_reads_no_section() {
+        let (_w, mut m) = setup();
+        let r = m.poll();
+        assert_eq!((r.percent, r.taken, r.dealt), (Some(42), None, None));
+        let w = World::new(1700000000);
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut m = w.meter(false).with_damage(Box::new(Stub { calls: calls.clone(), mode: None, taken: Some(None) }));
+        let r = m.poll();
+        assert_eq!((r.status.as_str(), r.taken, r.dealt), ("Unsupported game version", None, None));
+        assert!(calls.borrow().is_empty());
     }
 
     #[test]

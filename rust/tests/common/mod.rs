@@ -25,6 +25,12 @@ pub fn bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_dehulud"))
 }
 
+/// The DeHulud Combat binary of this build.
+#[allow(dead_code)]
+pub fn combat_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_dehulud-combat"))
+}
+
 pub fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
@@ -114,12 +120,27 @@ fn parse_info(line: &str) -> (u64, HashMap<String, u64>) {
 }
 
 impl Fake {
+    /// Damage commands return metadata for the consumer's read/failure hooks.
+    pub fn damage_frame(&mut self, frame: &str) -> Value {
+        let f = self.input.as_mut().unwrap();
+        writeln!(f, "damage {frame}").unwrap();
+        f.flush().unwrap();
+        let reply = json::parse(&self.recv()).expect("damage acknowledgement JSON");
+        assert!(reply.get("error").is_none(), "damage frame rejected: {reply:?}");
+        let metadata = reply.get("damage").expect("damage metadata").clone();
+        if let Some(Value::Int(Some(base))) = metadata.get("image_base") {
+            self.base = *base as u64;
+        }
+        metadata
+    }
+
     fn recv(&self) -> String {
         self.output.recv_timeout(WAIT).expect("the fake game did not answer")
     }
 
     /// `f/i/p obj offset value` (see tests/fake_game.py).
     pub fn cmd(&mut self, line: &str) {
+        assert!(!line.starts_with("damage "), "use damage_frame and apply its failure metadata");
         let f = self.input.as_mut().unwrap();
         writeln!(f, "{line}").unwrap();
         f.flush().unwrap();
@@ -185,11 +206,19 @@ pub struct Opts {
     pub fake_args: Vec<String>,
     pub control: Vec<(String, String)>,
     pub env: Vec<(String, String)>,
+    /// The program under test: DeHulud unless `combat()`.
+    pub bin: PathBuf,
 }
 
 impl Opts {
     pub fn new(start: Start) -> Opts {
-        Opts { args: vec!["--text".into()], start, fake_args: vec![], control: vec![], env: vec![] }
+        Opts { args: vec!["--text".into()], start, fake_args: vec![], control: vec![], env: vec![], bin: bin() }
+    }
+    /// Runs DeHulud Combat instead of DeHulud.
+    #[allow(dead_code)]
+    pub fn combat(mut self) -> Opts {
+        self.bin = combat_bin();
+        self
     }
     pub fn fake(mut self, args: &[&str]) -> Opts {
         self.fake_args = args.iter().map(|s| s.to_string()).collect();
@@ -255,7 +284,7 @@ impl Run {
             r#"exec "$DH_PY" -B "$DH_FAKE" DuneSandbox-Win64-Shipping.exe $DH_FAKE_ARGS <"$DH_IN" >"$DH_OUT""#;
         let mut cmd = match o.start {
             Start::None => {
-                let mut c = Command::new(bin());
+                let mut c = Command::new(&o.bin);
                 c.args(&o.args);
                 c
             }
@@ -268,7 +297,7 @@ impl Run {
                 c
             }
             Start::Launch => {
-                let mut c = Command::new(bin());
+                let mut c = Command::new(&o.bin);
                 c.args(&o.args).args(["--launch", "/bin/sh", "-c", &format!(r#"echo $$ >"$DH_PIDF"; {fake_cmd}"#)]);
                 c
             }
@@ -290,7 +319,7 @@ impl Run {
             .env("DH_IN", &fin)
             .env("DH_OUT", &fout)
             .env("DH_PIDF", &pidf)
-            .env("DH_BIN", bin())
+            .env("DH_BIN", &o.bin)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -338,6 +367,30 @@ impl Run {
             self.control.push((k.to_string(), v.to_string()));
         }
         write_control(&self.ctl, &self.control);
+    }
+
+    /// One synchronous frame; replace failure ranges instead of accumulating them.
+    pub fn damage_step(&mut self, step: i64, at_ms: i64, enabled: &[&str], failures: &Value) -> Value {
+        self.control.retain(|(key, _)| {
+            !["fail_range", "damage_step", "at_ms", "enabled", "base", "pid", "size"].contains(&key.as_str())
+        });
+        let fake = self.fake.as_ref().unwrap();
+        self.control.extend([
+            ("damage_step".into(), step.to_string()),
+            ("at_ms".into(), at_ms.to_string()),
+            ("enabled".into(), enabled.join(",")),
+            ("base".into(), fake.base.to_string()),
+            ("pid".into(), fake.pid.to_string()),
+            ("size".into(), fake.size.to_string()),
+        ]);
+        let Value::Array(ranges) = failures else { panic!("failure ranges must be an array") };
+        for range in ranges {
+            let Value::Array(pair) = range else { panic!("failure range must be a pair") };
+            let [Value::Int(Some(start)), Value::Int(Some(end))] = pair.as_slice() else { panic!("invalid range") };
+            self.control.push(("fail_range".into(), format!("{start}:{end}")));
+        }
+        write_control(&self.ctl, &self.control);
+        self.wait_for("damage frame", |poll| poll.get("damage_step") == Some(&Value::Int(Some(step))))
     }
 
     pub fn fake(&mut self) -> &mut Fake {

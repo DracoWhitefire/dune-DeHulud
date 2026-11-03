@@ -14,15 +14,26 @@
 //! - [`config`], [`json`]: the shared window config file.
 //! - [`display`], [`font`], [`window`]: the X11 window (local Unix socket only, built-in bitmap font).
 //! - [`app`]: command line, `--launch`, choosing window or text mode.
+//!
+//! The same crate builds a second program, DeHulud Combat (`dehulud-combat`): the worm meter plus damage taken
+//! and damage dealt, sharing everything above. Its own parts:
+//! - [`damage`]: the damage readers (health, shield and target tracking), called only by DeHulud Combat.
+//! - [`sections`]: its window's switchable sections and the damage numbers they show.
+//! - [`combat_config`], [`combat_window`], [`combat_app`]: its config file, window and command line.
 
 pub mod app;
+pub mod combat_app;
+pub mod combat_config;
+pub mod combat_window;
 pub mod config;
+pub mod damage;
 pub mod display;
 pub mod font;
 pub mod help;
 pub mod json;
 pub mod meter;
 pub mod procfs;
+pub mod sections;
 pub mod text;
 pub mod window;
 
@@ -33,6 +44,10 @@ pub mod testhook;
 /// normal build has no way to change what the meter reads.
 #[cfg(not(feature = "test-source"))]
 pub mod testhook {
+    pub fn now() -> std::time::Instant {
+        std::time::Instant::now()
+    }
+    pub fn route(_name: &'static str) {}
     pub fn trace(_line: impl FnOnce() -> String) {}
     pub fn note_connect(_addr: &str) {}
     pub fn poll_interval() -> Option<std::time::Duration> {

@@ -119,7 +119,7 @@ fn is_tty() -> bool {
 
 fn make_meter(launched: bool, child: Option<u32>) -> Box<dyn Poll> {
     #[cfg(feature = "test-source")]
-    if let Some(m) = crate::testhook::meter(launched, child) {
+    if let Some(m) = crate::testhook::meter(launched, child, false) {
         return m;
     }
     let _ = child;

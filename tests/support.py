@@ -24,11 +24,32 @@ class FakeGame:
         info = json.loads(self.proc.stdout.readline())
         self.pid, self.base, self.obj, self.size = self.proc.pid, info["base"], info["obj"], info["size"]
         self.timestamp, self.build = info["timestamp"], info["build"]
+        self.damage = info.get("damage")
 
     def cmd(self, line):
+        if line.startswith("damage "):
+            frame = json.loads(line.split(" ", 1)[1])
+            if "fail_reads" in frame:
+                raise ValueError("use damage_frame and apply failure metadata to the consumer reader")
+            self.damage_frame(frame)
+            return
         self.proc.stdin.write(line + "\n")
         self.proc.stdin.flush()
         assert self.proc.stdout.readline().strip() == "ok", line
+
+    def damage_frame(self, frame, reader=None):
+        """Apply a frame and install returned failure ranges in the consumer reader."""
+        self.proc.stdin.write("damage " + json.dumps(frame) + "\n")
+        self.proc.stdin.flush()
+        reply = json.loads(self.proc.stdout.readline())
+        if "error" in reply:
+            raise ValueError(reply["error"])
+        self.damage = reply["damage"]
+        self.base = self.damage.get("image_base", self.base)
+        if reader is not None:
+            reader.failures = self.damage["failure_ranges"]
+            reader.log.clear()
+        return self.damage
 
     def exec_image(self, timestamp):
         """The child execs a fresh fake game in place: same pid and (with --fixed) same addresses, but an image

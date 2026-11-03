@@ -1,6 +1,7 @@
 //! The one-line terminal meter (`--text`, and the fallback without a local X display).
 
 use crate::meter::{APP, MENU_HINT, POLL, Poll, Reading};
+use crate::sections::Features;
 use std::io::{self, Write};
 use std::time::Duration;
 
@@ -36,7 +37,7 @@ pub fn run_text(
     let mut last: Option<String> = None;
     let mut said: Option<String> = None;
     while !should_stop() {
-        let r = meter.poll();
+        let r = meter.poll_enabled(Features::TEXT); // the line is the worm meter's: only its route is read
         if !r.detail.is_empty() && said.as_deref() != Some(r.detail.as_str()) {
             let text = if tty { format!("\n{}\n", r.detail) } else { format!("{}\n", r.detail) };
             let _ = err.write_all(text.as_bytes());
@@ -83,7 +84,8 @@ mod tests {
 
     struct Script(std::vec::IntoIter<Reading>);
     impl Poll for Script {
-        fn poll(&mut self) -> Reading {
+        fn poll_enabled(&mut self, enabled: Features) -> Reading {
+            assert_eq!(enabled, Features::TEXT);
             self.0.next().expect("script")
         }
     }

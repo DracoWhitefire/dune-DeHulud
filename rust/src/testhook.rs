@@ -19,19 +19,44 @@
 //! | `poll_ms=<n>`, `scan_ms=<n>` | poll interval and rescan interval |
 //! | `stop=1` | end the meter (then exit, or wait for the --launch child) |
 //! | `trace=<path>` | append one JSON line per poll and per window event |
-//! | `reading=status\|percent\|fraction\|hint\|detail` | repeatable: a scripted meter instead of the real one |
+//! | `reading=status\|percent\|fraction\|hint\|detail\|taken\|dealt` | repeatable: a scripted meter instead of the real one |
 //! | `step=<n>` | which scripted reading is shown |
+//!
+//! A scripted reading's damage fields: `-` = unreadable (the section shows '-'), empty = nothing emitted, a
+//! number = that drop (taken), `health/shield` with either side empty (dealt). The numbers are emitted on the
+//! first poll of a step only, as a real hit is; later polls of the same step emit nothing, so the numbers fade.
 //!
 //! Only the listed process is ever looked at; every other pid is refused here.
 
 use crate::json::quote;
 use crate::meter::{Meter, Poll, Reading};
 use crate::procfs::{self, Memory, Source};
+use crate::sections::{Feature, Features};
+use std::cell::Cell;
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+thread_local! { static ROUTE: Cell<&'static str> = const { Cell::new("shared") }; }
+
+/// Names a read route for diagnostics; range-overlap assertions remain authoritative.
+pub fn route(name: &'static str) {
+    ROUTE.with(|r| r.set(name));
+}
+
+/// Deterministic damage-frame time, otherwise the normal monotonic clock.
+pub fn now() -> Instant {
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    let c = control();
+    if c.num("damage_step").is_some() {
+        *BASE.get_or_init(Instant::now) + Duration::from_millis(c.num("at_ms").unwrap_or(0))
+    } else {
+        Instant::now()
+    }
+}
 
 const VAR: &str = "DEHULUD_TEST_SOURCE";
 
@@ -172,6 +197,35 @@ impl Source for TestSource {
 /// Every read refused, as by the kernel without permission.
 struct Denied(u64);
 
+struct Logged {
+    inner: Box<dyn Memory>,
+    count: u64,
+}
+
+impl Memory for Logged {
+    fn read(&mut self, address: u64, size: usize) -> Result<Vec<u8>, i32> {
+        self.count += 1;
+        let c = control();
+        let failed = c.keys.iter().filter(|(k, _)| k == "fail_range").any(|(_, v)| {
+            let Some((start, end)) = v.split_once(':') else { return false };
+            match (start.parse::<u64>(), end.parse::<u64>()) {
+                (Ok(start), Ok(end)) => address < end && start < address.saturating_add(size as u64),
+                _ => false,
+            }
+        });
+        let result = if failed { Err(libc::EFAULT) } else { self.inner.read(address, size) };
+        let step = c.num("damage_step").map_or("null".into(), |n| n.to_string());
+        ROUTE.with(|r| trace(|| format!(
+            "{{\"event\":\"read\",\"damage_step\":{step},\"address\":{address},\"size\":{size},\"route\":{},\"failed\":{}}}",
+            quote(r.get()), result.is_err()
+        )));
+        result
+    }
+    fn count(&self) -> u64 {
+        self.count
+    }
+}
+
 impl Memory for Denied {
     fn read(&mut self, _addr: u64, _size: usize) -> Result<Vec<u8>, i32> {
         self.0 += 1;
@@ -182,80 +236,159 @@ impl Memory for Denied {
     }
 }
 
-fn reading_json(n: u64, r: &Reading, reads: u64, build: Option<&str>) -> String {
+fn reading_json(n: u64, r: &Reading, reads: u64, build: Option<&str>, enabled: Features) -> String {
     let opt = |v: Option<String>| v.unwrap_or_else(|| "null".into());
+    let num = |v: Option<f64>| opt(v.map(|f| format!("{f:?}")));
+    let keys: Vec<String> = enabled.keys().iter().map(|k| quote(k)).collect();
     format!(
         "{{\"event\": \"poll\", \"n\": {n}, \"status\": {}, \"percent\": {}, \"fraction\": {}, \"hint\": {}, \"detail\": {}, \
-         \"reads\": {reads}, \"build\": {}, \"line\": {}}}",
+         \"reads\": {reads}, \"build\": {}, \"line\": {}, \"enabled\": [{}], \"taken\": {}, \"dealt\": {}, \"damage_step\": {}}}",
         quote(&r.status),
         opt(r.percent.map(|p| p.to_string())),
         opt(r.fraction.map(|f| format!("{f:?}"))),
         quote(&r.hint),
         quote(&r.detail),
         opt(build.map(quote)),
-        quote(&crate::text::format_line(r))
+        quote(&crate::text::format_line(r)),
+        keys.join(", "),
+        opt(r.taken.map(|t| format!("[{}]", num(t)))),
+        opt(r.dealt.map(|(h, s)| format!("[{}, {}]", num(h), num(s)))),
+        opt(control().num("damage_step").map(|n| n.to_string()))
     )
 }
 
 struct Traced {
     meter: Meter,
     n: u64,
+    step: Option<u64>,
+    last: Reading,
+    enabled: Option<Features>,
+}
+
+/// A header switch reached the meter (the tests check the window's wiring to the damage readers).
+fn trace_reset(f: Feature) {
+    trace(|| format!("{{\"event\": \"reset\", \"feature\": {}}}", quote(f.key())));
 }
 
 impl Poll for Traced {
-    fn poll(&mut self) -> Reading {
-        let r = self.meter.poll();
+    fn reset(&mut self, f: Feature) {
+        trace_reset(f);
+        self.meter.reset(f);
+    }
+
+    fn poll_enabled(&mut self, enabled: Features) -> Reading {
+        let c = control();
+        let step = c.num("damage_step");
+        if step.is_some() && step == self.step {
+            let mut r = self.last.clone();
+            r.taken = r.taken.map(|_| None);
+            r.dealt = r.dealt.map(|_| (None, None));
+            return r;
+        }
+        self.step = step;
+        let enabled = if step.is_some() {
+            c.get("enabled")
+                .map(|s| {
+                    let keys: Vec<_> = s.split(',').collect();
+                    Features {
+                        worm: keys.contains(&"worm"),
+                        taken: keys.contains(&"damage_taken"),
+                        dealt: keys.contains(&"damage_dealt"),
+                    }
+                })
+                .unwrap_or(enabled)
+        } else {
+            enabled
+        };
+        if step.is_some() {
+            if let Some(old) = self.enabled {
+                for f in Feature::ALL {
+                    if old.has(f) != enabled.has(f) {
+                        self.meter.reset(f);
+                    }
+                }
+            }
+            self.enabled = Some(enabled);
+        }
+        route("shared");
+        let r = self.meter.poll_enabled(enabled);
+        self.last = r.clone();
         self.n += 1;
-        trace(|| reading_json(self.n, &r, self.meter.reads, self.meter.attached_build()));
+        trace(|| reading_json(self.n, &r, self.meter.reads, self.meter.attached_build(), enabled));
         r
     }
 }
 
 struct Scripted {
     n: u64,
+    /// The step of the previous poll: damage numbers are emitted on the first poll of a step only.
+    step: Option<usize>,
 }
 
-fn parse_reading(s: &str) -> Reading {
-    let f: Vec<&str> = s.splitn(5, '|').collect();
+fn parse_reading(s: &str, first: bool) -> Reading {
+    let f: Vec<&str> = s.splitn(7, '|').collect();
     let get = |i: usize| f.get(i).copied().unwrap_or("");
+    let num = |v: &str| if first { v.parse().ok() } else { None };
+    let dealt = match get(6) {
+        "-" => None,
+        v => {
+            let (h, s) = v.split_once('/').unwrap_or((v, ""));
+            Some((num(h), num(s)))
+        }
+    };
     Reading {
         status: get(0).to_string(),
         percent: get(1).parse().ok(),
         fraction: get(2).parse().ok(),
         hint: get(3).to_string(),
         detail: get(4).replace("\\n", "\n"),
+        taken: if get(5) == "-" { None } else { Some(num(get(5))) },
+        dealt,
     }
 }
 
 impl Poll for Scripted {
-    fn poll(&mut self) -> Reading {
+    fn reset(&mut self, f: Feature) {
+        trace_reset(f);
+    }
+
+    fn poll_enabled(&mut self, enabled: Features) -> Reading {
         let c = control();
-        let step = c.num("step").unwrap_or(0) as usize;
-        let r = c
-            .readings
-            .get(step.min(c.readings.len().saturating_sub(1)))
-            .map_or(Reading::new("waiting for game"), |s| parse_reading(s));
+        let step = (c.num("step").unwrap_or(0) as usize).min(c.readings.len().saturating_sub(1));
+        let first = self.step != Some(step);
+        self.step = Some(step);
+        let mut r = c.readings.get(step).map_or(Reading::new("waiting for game"), |s| parse_reading(s, first));
+        if !enabled.taken {
+            r.taken = None; // a section that is off is not read
+        }
+        if !enabled.dealt {
+            r.dealt = None;
+        }
         self.n += 1;
-        trace(|| reading_json(self.n, &r, 0, None));
+        trace(|| reading_json(self.n, &r, 0, None, enabled));
         r
     }
 }
 
-/// The meter of a test build.
-pub fn meter(launched: bool, child: Option<u32>) -> Option<Box<dyn Poll>> {
+/// The meter of a test build; `damage`: with the damage readers (DeHulud Combat only).
+pub fn meter(launched: bool, child: Option<u32>, damage: bool) -> Option<Box<dyn Poll>> {
     let c = control();
     if !c.readings.is_empty() {
-        return Some(Box::new(Scripted { n: 0 }));
+        return Some(Box::new(Scripted { n: 0, step: None }));
     }
     let deny = c.on("deny");
     let scan = Duration::from_millis(c.num("scan_ms").unwrap_or(2000));
-    let meter = Meter::new(
+    let mut meter = Meter::new(
         Box::new(TestSource { child }),
         Box::new(move |pid| -> Box<dyn Memory> {
-            if deny { Box::new(Denied(0)) } else { Box::new(procfs::Reader::new(pid)) }
+            let inner: Box<dyn Memory> = if deny { Box::new(Denied(0)) } else { Box::new(procfs::Reader::new(pid)) };
+            Box::new(Logged { inner, count: 0 })
         }),
         launched,
         scan,
     );
-    Some(Box::new(Traced { meter, n: 0 }))
+    if damage {
+        meter = meter.with_damage(Box::new(crate::damage::DamageReader::default()));
+    }
+    Some(Box::new(Traced { meter, n: 0, step: None, last: Reading::new("waiting for game"), enabled: None }))
 }

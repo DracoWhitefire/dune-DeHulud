@@ -9,6 +9,7 @@ use crate::config::{self, Config, Monitor};
 use crate::display::{self, Connected, LocalDisplay};
 use crate::font::{BIG, Font, SMALL};
 use crate::meter::{APP, POLL, Poll, Reading};
+use crate::sections::Features;
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -27,16 +28,16 @@ pub const H: i32 = 44;
 /// The bar: x0, y0, x1, y1.
 pub const BAR: (i32, i32, i32, i32) = (44, 6, 130, 18);
 
-const BG: u32 = 0x1d1f21;
+pub(crate) const BG: u32 = 0x1d1f21;
 const LABEL: u32 = 0xd8cfb4;
-const BAR_EDGE: u32 = 0x4a4d50;
-const BAR_BG: u32 = 0x2a2c2e;
-const HINT: u32 = 0xb8c0c4;
-const PCT: u32 = 0xf0f0f0;
-const STATUS: u32 = 0xaab4b8;
-const MENU_BG: u32 = 0x2a2c2e;
-const MENU_FG: u32 = 0xe6e6e6;
-const MENU_HI: u32 = 0x3e4246;
+pub(crate) const BAR_EDGE: u32 = 0x4a4d50;
+pub(crate) const BAR_BG: u32 = 0x2a2c2e;
+pub(crate) const HINT: u32 = 0xb8c0c4;
+pub(crate) const PCT: u32 = 0xf0f0f0;
+pub(crate) const STATUS: u32 = 0xaab4b8;
+pub(crate) const MENU_BG: u32 = 0x2a2c2e;
+pub(crate) const MENU_FG: u32 = 0xe6e6e6;
+pub(crate) const MENU_HI: u32 = 0x3e4246;
 
 /// Green below 50 %, amber below 75 %, red from 75 %; grey without a value.
 pub fn bar_color(fraction: Option<f64>) -> u32 {
@@ -86,7 +87,7 @@ const MENU: [(Option<Item>, &str); 5] = [
 const ITEM_H: i32 = 18;
 const SEP_H: i32 = 7;
 const MENU_PAD: i32 = 2;
-const CHECK_W: i32 = 20;
+pub(crate) const CHECK_W: i32 = 20;
 
 /// One menu row: entry (None: separator), label, y0, y1.
 pub type MenuRow = (Option<Item>, &'static str, i32, i32);
@@ -145,10 +146,25 @@ pub fn wrap(text: &str, max: usize) -> Vec<String> {
     out
 }
 
-type Res<T> = Result<T, String>;
+pub(crate) type Res<T> = Result<T, String>;
 
-fn x<T, E: std::fmt::Display>(r: Result<T, E>) -> Res<T> {
+pub(crate) fn x<T, E: std::fmt::Display>(r: Result<T, E>) -> Res<T> {
     r.map_err(|e| e.to_string())
+}
+
+/// Always on top the way Tk's "-topmost" asks for it: _NET_WM_STATE_ABOVE in the window's _NET_WM_STATE before
+/// it is mapped, and once mapped the EWMH client message to the root window (the window manager's part).
+/// `atoms`: _NET_WM_STATE and _NET_WM_STATE_ABOVE. Both programs' windows use it.
+pub(crate) fn keep_above(c: &Connected, root: u32, atoms: (u32, u32), win: u32, mapped: bool) -> Res<()> {
+    let (net_wm_state, above) = atoms;
+    if !mapped {
+        x(c.conn.change_property32(PropMode::REPLACE, win, net_wm_state, AtomEnum::ATOM, &[above]))?;
+        return Ok(());
+    }
+    const NET_WM_STATE_ADD: u32 = 1;
+    let ev = ClientMessageEvent::new(32, win, net_wm_state, [NET_WM_STATE_ADD, above, 0, 0, 0]);
+    x(c.conn.send_event(false, root, EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT, ev))?;
+    Ok(())
 }
 
 struct Atoms {
@@ -364,25 +380,9 @@ impl<'m> Window<'m> {
         Ok(())
     }
 
-    /// Always on top the way Tk's "-topmost" asks for it: _NET_WM_STATE_ABOVE in the window's _NET_WM_STATE before
-    /// it is mapped, and once mapped the EWMH client message to the root window (the window manager's part).
+    /// Always on top: see [`keep_above`].
     fn keep_above(&self, win: u32, mapped: bool) -> Res<()> {
-        let conn = &self.c.conn;
-        if !mapped {
-            x(conn.change_property32(
-                PropMode::REPLACE,
-                win,
-                self.atoms.net_wm_state,
-                AtomEnum::ATOM,
-                &[self.atoms.above],
-            ))?;
-            return Ok(());
-        }
-        const NET_WM_STATE_ADD: u32 = 1;
-        let ev =
-            ClientMessageEvent::new(32, win, self.atoms.net_wm_state, [NET_WM_STATE_ADD, self.atoms.above, 0, 0, 0]);
-        x(conn.send_event(false, self.root, EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT, ev))?;
-        Ok(())
+        keep_above(&self.c, self.root, (self.atoms.net_wm_state, self.atoms.above), win, mapped)
     }
 
     fn create_main(&mut self) -> Res<()> {
@@ -751,7 +751,7 @@ impl<'m> Window<'m> {
     }
 
     fn tick(&mut self) -> Res<()> {
-        let r = self.meter.poll();
+        let r = self.meter.poll_enabled(Features::TEXT); // the worm meter only: DeHulud reads nothing else
         if !r.detail.is_empty() && self.said.as_deref() != Some(r.detail.as_str()) {
             eprintln!("{}", r.detail);
             self.said = Some(r.detail.clone());
