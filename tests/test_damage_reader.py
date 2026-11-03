@@ -7,6 +7,31 @@ import unittest
 
 import support  # noqa: F401  (the repository on sys.path)
 import dehulud_combat as dehulud
+from support import FakeGame, FakeSource
+
+
+class DamageBuilds(unittest.TestCase):
+    def test_damage_keys_are_supported_and_plain_table_has_no_damage(self):
+        self.assertEqual(set(dehulud.DAMAGE_BUILDS), {(1793384724, 220024832)})
+        self.assertLessEqual(set(dehulud.DAMAGE_BUILDS), set(dehulud.BUILDS))
+        self.assertTrue(all("damage" not in build for build in dehulud.BUILDS.values()))
+
+    def test_older_builds_keep_worm_and_read_no_damage(self):
+        for build in ("26224975", "26083551"):
+            with self.subTest(build=build):
+                game = FakeGame("--build", build)
+                try:
+                    meter = dehulud.Meter(source=FakeSource(game), damage=dehulud.DamageReader())
+                    reading = meter.poll()
+                    self.assertEqual((reading.status, reading.percent, reading.taken, reading.dealt),
+                                     ("on foot", 42, None, None))
+                    self.assertEqual(meter.reads, 1 + 8 + 21)
+                    self.assertIsNone(dehulud.damage_layout(meter.game[2]))
+                    reading = meter.poll()
+                    self.assertEqual((reading.percent, reading.taken, reading.dealt), (42, None, None))
+                    self.assertEqual(meter.reads, 21)
+                finally:
+                    game.close()
 
 
 class History(unittest.TestCase):

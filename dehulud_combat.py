@@ -54,6 +54,41 @@ TEXT = frozenset(("worm",))   # what the terminal line shows (the section flags 
 TEXT_NO_WORM = "dehulud-combat: text mode shows only the worm meter; drop --no-worm"
 
 
+# Damage routes by (PE TimeDateStamp, SizeOfImage); absent builds have no damage route.
+DAMAGE_BUILDS = {
+    (1793384724, 220024832): {
+        "attribute_set": 0x1400,       # ADuneCharacter.m_DuneCharacterAttributeSet
+        "health": 0x98,                # UDuneCharacterAttributeSet.CurrentHealth
+        "maximum": 0xC0,               # UDuneCharacterAttributeSet.MaxHealth
+        "power": 0x320,                # UDuneCharacterAttributeSet.CurrentPower
+        "payload": 0x18,               # FglGameplayAttributeData.CurrentValuePtr
+        "current": 0xC,                # FGameplayAttributeData.CurrentValue
+        "cls_attributes": 0xC146A88,   # UDuneCharacterAttributeSet class slot RVA
+        "cls_controller": 0xC175948,   # ADunePlayerController class slot RVA
+        "coordinator": 0x1048,         # ADunePlayerController.m_InventoryCoordinator
+        "owner": 0x268,                # UInventoryCoordinator.m_OwnerCharacter
+        "cls_coordinator": 0xC1CD1D8,  # UInventoryCoordinator class slot RVA
+        "aim": 0x1E58,                 # ADunePlayerCharacter.m_CachedAimTarget
+        "soft_lock": 0x1D80,           # ADunePlayerCharacter.m_SoftLockTarget
+        "weak_index": 0,               # FWeakObjectPtr.ObjectIndex
+        "weak_serial": 4,              # FWeakObjectPtr.ObjectSerialNumber
+        "chunks": 0xC337DC0,           # GUObjectArray.ObjObjects.Objects
+        "count": 0xC337DD4,            # GUObjectArray.ObjObjects.NumElements
+        "shift": 16,                   # FChunkedFixedUObjectArray chunk index shift
+        "stride": 24,                  # FUObjectItem stride
+        "item_object": 0,              # FUObjectItem.Object
+        "item_flags": 8,               # FUObjectItem.Flags
+        "item_serial": 16,             # FUObjectItem.SerialNumber
+        "reject_flags": 0x30200000,    # FUObjectItem.Flags weak reject mask
+    },
+}
+
+
+def damage_layout(build):
+    """Damage offsets for an identified entry of the shared builds table, or None."""
+    return next((DAMAGE_BUILDS.get(key) for key, entry in BUILDS.items() if entry is build), None)
+
+
 Attached = collections.namedtuple("Attached", "base build reader")
 Attached.__doc__ = "The attached game as the damage readers get it: image base, builds table entry, memory reader."
 
@@ -212,7 +247,7 @@ class DamageReader:
 
     def character(self, game):
         b, ptr = game.build, self.pointer
-        d = b["damage"]
+        d = damage_layout(b)
         if d is None:
             raise _Soft("no data")
         if self.path is not None:
@@ -250,7 +285,7 @@ class DamageReader:
         return self.path
 
     def vitals(self, game, obj, shield=False):
-        d = game.build["damage"]
+        d = damage_layout(game.build)
         attributes = self.pointer(game, obj + d["attribute_set"])
         self.require_class(game, attributes, d["cls_attributes"], True)
         payload = self.pointer(game, attributes + d["health"] + d["payload"], alignment=4)
@@ -279,13 +314,13 @@ class DamageReader:
         return self.history.taken(sample, self.now)
 
     def handle(self, game, address):
-        d, raw = game.build["damage"], game.reader.read(address, 8)
+        d, raw = damage_layout(game.build), game.reader.read(address, 8)
         index, = struct.unpack_from("<i", raw, d["weak_index"])
         serial, = struct.unpack_from("<i", raw, d["weak_serial"])
         return (index, serial) if index >= 0 and serial != 0 else None
 
     def target(self, game, key):
-        d = game.build["damage"]
+        d = damage_layout(game.build)
         index, serial = key
         count, = struct.unpack("<i", game.reader.read(game.base + d["count"], 4))
         if not 0 <= index < count:
@@ -312,7 +347,7 @@ class DamageReader:
             self.reset()
             return None
         try:
-            d = game.build["damage"]
+            d = damage_layout(game.build)
             aim = self.handle(game, own + d["aim"])
             soft = self.handle(game, own + d["soft_lock"])
         except (OSError, _Soft):

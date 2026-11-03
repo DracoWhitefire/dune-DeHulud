@@ -1,6 +1,6 @@
 //! Character vitals, weak target resolution and net drops between adjacent polls.
 
-use crate::meter::{Attached, Damage};
+use crate::meter::{Attached, Build, Damage};
 use crate::sections::{Feature, Features};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -38,31 +38,39 @@ pub struct Layout {
     pub reject_flags: u32,
 }
 
-pub static BUILD_26333948: Layout = Layout {
-    attribute_set: 0x1400,      // ADuneCharacter.m_DuneCharacterAttributeSet
-    health: 0x98,               // UDuneCharacterAttributeSet.CurrentHealth
-    maximum: 0xC0,              // UDuneCharacterAttributeSet.MaxHealth
-    power: 0x320,               // UDuneCharacterAttributeSet.CurrentPower
-    payload: 0x18,              // FglGameplayAttributeData.CurrentValuePtr
-    current: 0xC,               // FGameplayAttributeData.CurrentValue
-    cls_attributes: 0xC146A88,  // UDuneCharacterAttributeSet class slot RVA
-    cls_controller: 0xC175948,  // ADunePlayerController class slot RVA
-    coordinator: 0x1048,        // ADunePlayerController.m_InventoryCoordinator
-    owner: 0x268,               // UInventoryCoordinator.m_OwnerCharacter
-    cls_coordinator: 0xC1CD1D8, // UInventoryCoordinator class slot RVA
-    aim: 0x1E58,                // ADunePlayerCharacter.m_CachedAimTarget
-    soft_lock: 0x1D80,          // ADunePlayerCharacter.m_SoftLockTarget
-    weak_index: 0,              // FWeakObjectPtr.ObjectIndex
-    weak_serial: 4,             // FWeakObjectPtr.ObjectSerialNumber
-    chunks: 0xC337DC0,          // GUObjectArray.ObjObjects.Objects
-    count: 0xC337DD4,           // GUObjectArray.ObjObjects.NumElements
-    shift: 16,                  // FChunkedFixedUObjectArray chunk index shift
-    stride: 24,                 // FUObjectItem stride
-    item_object: 0,             // FUObjectItem.Object
-    item_flags: 8,              // FUObjectItem.Flags
-    item_serial: 16,            // FUObjectItem.SerialNumber
-    reject_flags: 0x30200000,   // FUObjectItem.Flags weak reject mask
-};
+pub static DAMAGE_BUILDS: &[((u32, u32), Layout)] = &[(
+    (1793384724, 220024832),
+    Layout {
+        attribute_set: 0x1400,      // ADuneCharacter.m_DuneCharacterAttributeSet
+        health: 0x98,               // UDuneCharacterAttributeSet.CurrentHealth
+        maximum: 0xC0,              // UDuneCharacterAttributeSet.MaxHealth
+        power: 0x320,               // UDuneCharacterAttributeSet.CurrentPower
+        payload: 0x18,              // FglGameplayAttributeData.CurrentValuePtr
+        current: 0xC,               // FGameplayAttributeData.CurrentValue
+        cls_attributes: 0xC146A88,  // UDuneCharacterAttributeSet class slot RVA
+        cls_controller: 0xC175948,  // ADunePlayerController class slot RVA
+        coordinator: 0x1048,        // ADunePlayerController.m_InventoryCoordinator
+        owner: 0x268,               // UInventoryCoordinator.m_OwnerCharacter
+        cls_coordinator: 0xC1CD1D8, // UInventoryCoordinator class slot RVA
+        aim: 0x1E58,                // ADunePlayerCharacter.m_CachedAimTarget
+        soft_lock: 0x1D80,          // ADunePlayerCharacter.m_SoftLockTarget
+        weak_index: 0,              // FWeakObjectPtr.ObjectIndex
+        weak_serial: 4,             // FWeakObjectPtr.ObjectSerialNumber
+        chunks: 0xC337DC0,          // GUObjectArray.ObjObjects.Objects
+        count: 0xC337DD4,           // GUObjectArray.ObjObjects.NumElements
+        shift: 16,                  // FChunkedFixedUObjectArray chunk index shift
+        stride: 24,                 // FUObjectItem stride
+        item_object: 0,             // FUObjectItem.Object
+        item_flags: 8,              // FUObjectItem.Flags
+        item_serial: 16,            // FUObjectItem.SerialNumber
+        reject_flags: 0x30200000,   // FUObjectItem.Flags weak reject mask
+    },
+)];
+
+/// Damage offsets for an identified entry of the shared builds table, or None.
+pub fn layout(build: &Build) -> Option<&'static Layout> {
+    DAMAGE_BUILDS.iter().find(|(key, _)| *key == (build.pe_timestamp, build.size_of_image)).map(|(_, layout)| layout)
+}
 
 fn channel(old: Baseline, value: f64, maximum: Option<f64>, now: Instant) -> (Baseline, Option<f64>) {
     if !value.is_finite() || value < 0.0 || maximum.is_some_and(|m| !m.is_finite() || m <= 0.0 || value > m) {
@@ -172,7 +180,7 @@ fn require(g: &mut Attached, obj: u64, slot: u64, exact: bool) -> Result<(), ()>
 }
 
 fn vitals(g: &mut Attached, obj: u64, shield: bool) -> Result<Sample, ()> {
-    let d = g.build.damage.ok_or(())?;
+    let d = layout(g.build).ok_or(())?;
     let attrs = object(g, obj + d.attribute_set)?; // ADuneCharacter.m_DuneCharacterAttributeSet
     require(g, attrs, d.cls_attributes, true)?; // UDuneCharacterAttributeSet class slot RVA
     let payload = aligned(g, attrs + d.health + d.payload, 4)?; // CurrentHealth + CurrentValuePtr
@@ -186,7 +194,7 @@ fn vitals(g: &mut Attached, obj: u64, shield: bool) -> Result<Sample, ()> {
 }
 
 fn handle(g: &mut Attached, address: u64) -> Result<Option<Key>, ()> {
-    let d = g.build.damage.ok_or(())?;
+    let d = layout(g.build).ok_or(())?;
     let raw = read(g, address, 8)?;
     let key = (
         i32::from_le_bytes(raw[d.weak_index..d.weak_index + 4].try_into().unwrap()),
@@ -204,7 +212,7 @@ fn item_fields(raw: &[u8], d: &Layout) -> (u64, u32, i32) {
 }
 
 fn target(g: &mut Attached, key: Key) -> Result<Sample, ()> {
-    let d = g.build.damage.ok_or(())?;
+    let d = layout(g.build).ok_or(())?;
     let count = i32::from_le_bytes(read(g, g.base + d.count, 4)?.try_into().unwrap()); // GUObjectArray.ObjObjects.NumElements
     if key.0 < 0 || key.0 >= count {
         return Err(());
@@ -281,14 +289,14 @@ impl DamageReader {
     }
 
     fn character(&mut self, g: &mut Attached) -> Result<(u64, u64, &'static str), ()> {
-        if g.build.damage.is_none() {
+        if layout(g.build).is_none() {
             return Err(());
         }
         if let Some(path) = self.path {
             return Ok(path);
         }
         let b = g.build;
-        let d = b.damage.ok_or(())?;
+        let d = layout(b).ok_or(())?;
         let world = object(g, g.base + b.gworld)?;
         require(g, world, b.cls_world, true)?;
         let gi = object(g, world + b.world_game_instance)?;
@@ -353,7 +361,7 @@ impl Damage for DamageReader {
             return None;
         };
         let roles = (|| -> Result<_, ()> {
-            let d = g.build.damage.ok_or(())?;
+            let d = layout(g.build).ok_or(())?;
             Ok((
                 handle(g, own + d.aim)?, // ADunePlayerCharacter.m_CachedAimTarget
                 handle(g, own + d.soft_lock)?,
@@ -398,6 +406,30 @@ mod tests {
     use super::*;
     use crate::procfs::Memory;
     use std::time::Duration;
+
+    #[test]
+    fn damage_keys_are_supported_and_older_builds_read_no_damage() {
+        assert_eq!(DAMAGE_BUILDS.len(), 1);
+        for (key, _) in DAMAGE_BUILDS {
+            assert!(crate::meter::find_build(*key).is_some());
+        }
+        for key in [(1793030166, 219996160), (1792504044, 220008448)] {
+            let build = crate::meter::find_build(key).unwrap();
+            assert!(layout(build).is_none());
+            let mut mem = Bytes::default();
+            let mut reader = DamageReader::default();
+            let mut game = Attached { mem: &mut mem, base: 0x100000000, build };
+            assert_eq!(reader.taken(&mut game), None);
+            assert_eq!(reader.dealt(&mut game), None);
+            assert!(mem.log.is_empty());
+        }
+        let world = crate::meter::tests::World::new(crate::meter::tests::TS);
+        let mut meter = world.meter(false).with_damage(Box::new(DamageReader::default()));
+        use crate::meter::Poll;
+        let reading = meter.poll();
+        assert_eq!((reading.percent, reading.taken, reading.dealt), (Some(42), None, None));
+        assert_eq!(meter.reads, 1 + 8 + 21);
+    }
 
     #[test]
     fn own_death_healing_gap_maximum_and_failure() {

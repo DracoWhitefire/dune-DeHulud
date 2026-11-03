@@ -26,7 +26,6 @@ pub const MENU_HINT: &str = "right-click";
 /// member it reads. RVA values are relative to the image base; the rest are member offsets.
 #[derive(Debug)]
 pub struct Build {
-    pub damage: Option<&'static crate::damage::Layout>,
     pub build: &'static str,
     pub pe_timestamp: u32,
     pub size_of_image: u32,
@@ -61,7 +60,6 @@ pub struct Build {
 pub static BUILDS: &[Build] = &[
     Build {
         build: "26333948",
-        damage: Some(&crate::damage::BUILD_26333948),
         pe_timestamp: 1793384724,
         size_of_image: 220024832,
         gworld: 0xC4D3528,                    // GWorld slot RVA (holds the UWorld*)
@@ -89,7 +87,6 @@ pub static BUILDS: &[Build] = &[
     },
     Build {
         build: "26224975",
-        damage: None,
         pe_timestamp: 1793030166,
         size_of_image: 219996160,
         gworld: 0xC4CC568,                    // GWorld slot RVA (holds the UWorld*)
@@ -117,7 +114,6 @@ pub static BUILDS: &[Build] = &[
     },
     Build {
         build: "26083551",
-        damage: None,
         pe_timestamp: 1792504044,
         size_of_image: 220008448,
         gworld: 0xC4CF528,                    // GWorld slot RVA (holds the UWorld*)

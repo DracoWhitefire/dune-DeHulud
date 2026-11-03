@@ -44,36 +44,9 @@ MENU_HINT = "right-click"  # window hint: the full message is in the right-click
 # Build 26083551: pe_timestamp 1792504044, size_of_image 220008448 (executable 214900656 bytes).
 # Offsets come from static analysis of each build's executable; each is commented with the game member it
 # reads. "rva" values are relative to the image base; the rest are member offsets (the same in all builds).
-# "damage" holds the offsets DeHulud Combat (dehulud_combat.py) reads for damage taken and damage dealt (None:
-# not known for that build); DeHulud itself never reads them.
 BUILDS = {
     (1793384724, 220024832): {
         "build": "26333948",
-        "damage": {
-            "attribute_set": 0x1400,       # ADuneCharacter.m_DuneCharacterAttributeSet
-            "health": 0x98,                # UDuneCharacterAttributeSet.CurrentHealth
-            "maximum": 0xC0,               # UDuneCharacterAttributeSet.MaxHealth
-            "power": 0x320,                # UDuneCharacterAttributeSet.CurrentPower
-            "payload": 0x18,               # FglGameplayAttributeData.CurrentValuePtr
-            "current": 0xC,                # FGameplayAttributeData.CurrentValue
-            "cls_attributes": 0xC146A88,   # UDuneCharacterAttributeSet class slot RVA
-            "cls_controller": 0xC175948,   # ADunePlayerController class slot RVA
-            "coordinator": 0x1048,         # ADunePlayerController.m_InventoryCoordinator
-            "owner": 0x268,                # UInventoryCoordinator.m_OwnerCharacter
-            "cls_coordinator": 0xC1CD1D8,  # UInventoryCoordinator class slot RVA
-            "aim": 0x1E58,                 # ADunePlayerCharacter.m_CachedAimTarget
-            "soft_lock": 0x1D80,           # ADunePlayerCharacter.m_SoftLockTarget
-            "weak_index": 0,               # FWeakObjectPtr.ObjectIndex
-            "weak_serial": 4,              # FWeakObjectPtr.ObjectSerialNumber
-            "chunks": 0xC337DC0,           # GUObjectArray.ObjObjects.Objects
-            "count": 0xC337DD4,            # GUObjectArray.ObjObjects.NumElements
-            "shift": 16,                   # FChunkedFixedUObjectArray chunk index shift
-            "stride": 24,                  # FUObjectItem stride
-            "item_object": 0,              # FUObjectItem.Object
-            "item_flags": 8,               # FUObjectItem.Flags
-            "item_serial": 16,             # FUObjectItem.SerialNumber
-            "reject_flags": 0x30200000,    # FUObjectItem.Flags weak reject mask
-        },
         "gworld": 0xC4D3528,                     # GWorld slot RVA (holds the UWorld*)
         "cls_world": 0xC4D2F00,                  # UWorld class slot RVA (holds the UClass*)
         "cls_game_instance": 0xC4A1BC0,          # UGameInstance class slot RVA
@@ -99,7 +72,6 @@ BUILDS = {
     },
     (1793030166, 219996160): {
         "build": "26224975",
-        "damage": None,
         "gworld": 0xC4CC568,                     # GWorld slot RVA (holds the UWorld*)
         "cls_world": 0xC4CBF40,                  # UWorld class slot RVA (holds the UClass*)
         "cls_game_instance": 0xC49ABF0,          # UGameInstance class slot RVA
@@ -125,7 +97,6 @@ BUILDS = {
     },
     (1792504044, 220008448): {
         "build": "26083551",
-        "damage": None,
         "gworld": 0xC4CF528,                     # GWorld slot RVA (holds the UWorld*)
         "cls_world": 0xC4CEF00,                  # UWorld class slot RVA (holds the UClass*)
         "cls_game_instance": 0xC49DBB0,          # UGameInstance class slot RVA
