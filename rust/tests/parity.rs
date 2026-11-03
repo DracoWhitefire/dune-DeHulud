@@ -84,6 +84,26 @@ fn build_26224975_is_recognised_and_routes() {
 }
 
 #[test]
+fn build_26333948_is_recognised_and_routes() {
+    if !readable() {
+        return;
+    }
+    let mut run = game(&["--build", "26333948"]);
+    let first = run.first_attached();
+    assert_eq!(sp(&first), ("on foot".into(), Some(42)));
+    assert_eq!(text(&first, "build"), "26333948");
+    assert_eq!(int(&first, "reads"), 1 + 8 + 21);
+    run.cmd("p pc 0x388 veh"); // AController.Pawn
+    let p = run.wait_for("vehicle", |p| text(p, "status") == "vehicle");
+    assert_eq!((sp(&p), int(&p, "reads")), (("vehicle".into(), Some(80)), 20));
+    run.cmd("p pc 0x388 char");
+    let p = run.wait_for("on foot", |p| text(p, "status") == "on foot");
+    assert_eq!(sp(&p), ("on foot".into(), Some(42)));
+    dash(&mut run, &["p pc 0x388 bogus"]);
+    assert_eq!(run.stop(), 0);
+}
+
+#[test]
 fn unknown_build_is_unsupported_never_guessed() {
     if !readable() {
         return;

@@ -26,8 +26,8 @@ class Build(GameTest):
         self.assertEqual(self.meter.game[2]["build"], "26083551")
 
     def test_builds_table_identity(self):
-        self.assertEqual(sorted(dehulud.BUILDS), [(1792504044, 220008448), (1793030166, 219996160)])
-        self.assertEqual(sorted(b["build"] for b in dehulud.BUILDS.values()), ["26083551", "26224975"])
+        self.assertEqual(list(dehulud.BUILDS), [(1793384724, 220024832), (1793030166, 219996160), (1792504044, 220008448)])
+        self.assertEqual([b["build"] for b in dehulud.BUILDS.values()], ["26333948", "26224975", "26083551"])
 
 
 class BuildCurrent(GameTest):
@@ -46,6 +46,25 @@ class BuildCurrent(GameTest):
         new = dehulud.BUILDS[(1793030166, 219996160)]
         for key in ("gworld",) + dehulud.CLASS_SLOTS:
             self.assertNotEqual(old[key], new[key], key)
+        self.poll()
+        self.assertIs(self.meter.game[2], new)
+
+
+class Build26333948(GameTest):
+    extra = ("--build", "26333948")
+
+    def test_build_26333948_is_recognised(self):
+        self.assertEqual((self.game.build, self.game.timestamp, self.game.size), ("26333948", 1793384724, 220024832))
+        r = self.poll()
+        self.assertEqual((r.status, r.percent), ("on foot", 42))
+        self.assertEqual(self.meter.game[2]["build"], "26333948")
+        self.assertEqual(self.meter.reads, 1 + 8 + 21)
+
+    def test_other_builds_slots_are_not_used(self):
+        new = dehulud.BUILDS[(1793384724, 220024832)]
+        for ident in ((1793030166, 219996160), (1792504044, 220008448)):
+            for key in ("gworld",) + dehulud.CLASS_SLOTS:
+                self.assertNotEqual(dehulud.BUILDS[ident][key], new[key], key)
         self.poll()
         self.assertIs(self.meter.game[2], new)
 
@@ -344,6 +363,16 @@ class ImageReplacedCurrentBuild(ImageReplaced):
 class RouteCurrentBuild(Route):
     """Every route case again on build 26224975's layout (other slot addresses, the same members)."""
     extra = ("--build", "26224975")
+
+
+class ImageReplacedBuild26333948(ImageReplaced):
+    """The same image checks on build 26333948's layout."""
+    extra = ("--fixed", "--build", "26333948")
+
+
+class RouteBuild26333948(Route):
+    """Every route case again on build 26333948's layout."""
+    extra = ("--build", "26333948")
 
 
 class Quoting(unittest.TestCase):

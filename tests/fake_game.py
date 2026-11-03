@@ -15,9 +15,9 @@ and then obeys stdin lines:
   exit                       exit (status 0)
 Each other command is answered with "ok". Only this process's own memory is ever written.
 
-The constants below are typed in independently of dehulud.py (from the static analysis of builds 26224975 and
-26083551), so a wrong offset in dehulud.py cannot be hidden by the fake following it. --build picks the image
-layout (default 26083551); the member offsets are the same in both builds.
+The constants below are typed in independently of dehulud.py (from the static analysis of builds 26333948,
+26224975 and 26083551), so a wrong offset in dehulud.py cannot be hidden by the fake following it. --build picks
+the image layout (default 26083551); the member offsets are the same in all builds.
 """
 import ctypes
 import json
@@ -27,6 +27,15 @@ import struct
 import sys
 
 IMAGES = {   # build: (PE SizeOfImage, PE TimeDateStamp, GWorld slot RVA, class slot RVAs)
+    "26333948": (220024832, 1793384724, 0xC4D3528,
+                 {"world": 0xC4D2F00,
+                  "gi": 0xC4A1BC0,
+                  "lp": 0xC4B1730,
+                  "pc": 0xC4BF0E8,
+                  "char": 0xC16A450,
+                  "pchar": 0xC1732B0,
+                  "veh": 0xC1E7D88,
+                  "comp": 0xC1DCBF8}),
     "26083551": (220008448, 1792504044, 0xC4CF528,
                  {"world": 0xC4CEF00,       # class slot RVAs: UWorld
                   "gi": 0xC49DBB0,          # UGameInstance

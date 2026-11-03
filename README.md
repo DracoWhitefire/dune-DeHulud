@@ -111,6 +111,7 @@ game shows threat, that is the reason, not a fault of your setup.
 
 | game build | PE timestamp | SizeOfImage |
 |---|---|---|
+| 26333948 | 1793384724 (2026-10-30 18:25 UTC) | 220024832 |
 | 26224975 | 1793030166 (2026-10-26 15:56 UTC) | 219996160 |
 | 26083551 | 1792504044 (2026-10-20 13:47 UTC) | 220008448 |
 
