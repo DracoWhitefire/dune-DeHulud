@@ -1,8 +1,16 @@
-# Damage sections: how the window looks
+# DeHulud Combat: how its window looks
 
-The look of the header switches, the **Damage taken** list and the **Damage dealt** columns, for both versions of the
-window (Tk in `dehulud.py`, the drawn window with the built-in bitmap font in `rust/`). Behaviour (what is read, when
-a number is emitted) is not repeated here; this page only says what is drawn where, in which colour and size.
+This page is about **DeHulud Combat**, the second program in this repo: the window with the header switches, the
+**Damage taken** list and the **Damage dealt** columns, in both of its versions (Tk in `dehulud_combat.py`, the drawn
+window with the built-in bitmap font in the `dehulud-combat` binary). Its window is titled `DeHulud Combat`, and
+wherever the plain program shows its name (the window title, the help box) Combat shows that name; its config file
+lives in its own folder, `dehulud-combat`, with the same `x`, `y` and `frame` keys plus the three switches.
+
+**Plain DeHulud is not changed by this page**: its window stays 180 x 44, with no header row and the status line
+under the bar, exactly as shipped. Combat's worm meter is the same meter drawn the same way, under the header.
+
+Behaviour (what is read, when a number is emitted) is not repeated here; this page only says what is drawn where, in
+which colour and size.
 
 Everything below is in window pixels. The window stays **180 px wide**; only its height changes. Sizes are chosen on
 the bitmap font's grid so that both versions can place every item at the same pixel: the small font is 5 x 9 per
@@ -24,7 +32,7 @@ Window height = the sum of the shown sections. The order never changes; a sectio
 | worm | taken | dealt | height | the window |
 |---|---|---|---|---|
 | off | off | off | 18 | header only |
-| on | off | off | 62 | header, meter, status (today's window plus the header) |
+| on | off | off | 62 | Combat's worm-only window: header, meter, status (plain DeHulud stays 180 x 44) |
 | off | on | off | 98 | |
 | off | off | on | 114 | |
 | on | on | off | 122 | |
@@ -39,14 +47,14 @@ at once on a click in the header, and the window opens at the right height for t
 
 | use | hex | note |
 |---|---|---|
-| background | `#1d1f21` | unchanged |
-| section labels `WORM`, `TAKEN`, `DEALT`; a switch that is on | `#d8cfb4` | the existing label colour |
+| background | `#1d1f21` | as in plain DeHulud |
+| section labels `WORM`, `TAKEN`, `DEALT`; a switch that is on | `#d8cfb4` | plain DeHulud's label colour |
 | a switch that is off | `#6b7174` | the status colour at 55 % over the background |
 | column header `HEALTH` and health numbers | `#e8bf70` | the bar's amber |
 | column header `SHIELD` and shield numbers | `#8ad4c8` | new: pale teal, as muted as the other three bar colours |
 | damage taken numbers | `#ee7868` | the bar's red |
 | `-` (nothing trustworthy) in any section | `#85969d` | the bar's grey |
-| status line, hint | `#aab4b8`, `#b8c0c4` | unchanged |
+| status line, hint | `#aab4b8`, `#b8c0c4` | as in plain DeHulud |
 
 Fade steps, one per poll (4 polls per second). A number is drawn at full colour for its first two polls, then in three
 dimmer steps, and is removed on its fifth poll: about 1.25 s on screen. The dim steps are the colour blended towards
@@ -81,10 +89,11 @@ cover the full row width, so the target is the whole row, not just the character
 
 ## Worm meter
 
-Unchanged, only moved down by the header: inside its 24 px, `WORM` bold at (6, centre 12), the bar from (44, 6) to
-(130, 18), the hint centred in the bar, the percent in the big font right-aligned to x = 174 at centre 12. The status
-line is no longer part of this section: it is its own section at the bottom (below), so that `waiting for game` and
-`Unsupported game version` are still shown when the worm meter is off.
+Plain DeHulud's meter row, moved down by the header: inside its 24 px, `WORM` bold at (6, centre 12), the bar from
+(44, 6) to (130, 18), the hint centred in the bar, the percent in the big font right-aligned to x = 174 at centre 12.
+In Combat the status line is not part of this section: it is its own section at the bottom (below), so that
+`waiting for game` and `Unsupported game version` are still shown when the worm meter is off. (In plain DeHulud the
+status line stays under the bar, as shipped.)
 
 ## Damage taken
 
@@ -126,13 +135,13 @@ y=75  +------------------------------------+
 
 ## `-` and `Unsupported game version`
 
-The status line is one for the whole window and keeps today's texts and colour. A section shows a grey `-` in the big
+The status line is one for the whole window and keeps plain DeHulud's texts and colour. A section shows a grey `-` in the big
 font in its newest slot (taken: row 1; dealt: row 4, in both columns) and clears its list whenever the poll had nothing
 trustworthy for it:
 
 | state | worm | taken | dealt | status line |
 |---|---|---|---|---|
-| no game, not in world, no data, no permission, not started by `--launch` | `-` | `-` | `-` | as today |
+| no game, not in world, no data, no permission, not started by `--launch` | `-` | `-` | `-` | as in plain DeHulud |
 | `Unsupported game version` | `-`, hint `PE ...` in the bar | `-` | `-` | `Unsupported game version` |
 | in the world, worm threshold unset or value invalid | `-` | numbers | numbers | `on foot, no threshold` etc. |
 | in a vehicle, no own-character route in the constants, or an invalid health pair | numbers or `-` | `-` | numbers | `vehicle` |
@@ -201,9 +210,10 @@ differ from the bitmap font, which is why every number and column header is righ
 Identical: the section order and heights, every x and y above, the window width, the colours and fade steps by poll
 age, the strings, the click zones and the click-or-drag rule, which section shows `-` when, the five-digit cap, the
 config keys (`worm`, `damage_taken`, `damage_dealt`) and flags (`--no-worm`, `--no-taken`, `--no-dealt`), and that
-a click in the header saves the clicked switch to the config file.
+a click in the header saves the clicked switch to Combat's config file (a switch set by a `--no-*` flag keeps the
+file's value until it is clicked).
 
 May differ: glyph shapes, anti-aliasing, the exact pixel width of a text (hence the right-aligned anchors), the
-menu (Tk's own menu against the drawn one) and the help box, as today.
+menu (Tk's own menu against the drawn one) and the help box, as in plain DeHulud.
 
-Not covered here: the terminal line (`--text`); it is unchanged by this page.
+Not covered here: Combat's terminal line (`--text`), and anything about plain DeHulud, which this page leaves as it is.
