@@ -76,6 +76,7 @@ on foot
 ```
 
 The same meter also exists as one static binary that needs no Python: see [Rust version](#rust-version).
+A separate program, **DeHulud Combat**, adds damage taken and damage dealt: see [DeHulud Combat](#dehulud-combat).
 
 ## What the meter shows
 
@@ -130,8 +131,10 @@ to install).
 
 **The first time, step by step:**
 
-1. Download `dehulud.py` from the project page (or the whole project as a ZIP file, then unzip it:
-   right-click the ZIP > *Extract*, or `unzip` in a terminal).
+1. Download `dehulud.py` from the project page, or one of the ZIP files there, then unzip it: right-click the
+   ZIP > *Extract*, or `unzip` in a terminal. `DeHulud.zip` holds `dehulud.py`, the `dehulud` binary and this
+   README; `DeHulud-Combat.zip` holds `dehulud.py`, `dehulud_combat.py`, the `dehulud-combat` binary and this
+   README (see [DeHulud Combat](#dehulud-combat)).
 2. Put `dehulud.py` in a folder of your own and leave it there, for example a new folder `dehulud` in your
    home folder. The Steam launch option, if you use it, points to this place.
 3. Open a terminal in that folder: in the file manager, right-click inside the folder > *Open Terminal
@@ -243,6 +246,58 @@ names `--features test-source` - such as the test command above, even with `--re
 binary built with it refuses to run without the test's control file. Share only binaries from the normal build. The Python tests (`python3 -m unittest discover -s tests`) are unchanged
 and cover the Python version.
 
+## DeHulud Combat
+
+**DeHulud Combat** is a second, separate program: the same worm meter as plain DeHulud, plus two more sections in
+its window, **Damage taken** and **Damage dealt**. Plain DeHulud stays exactly as described above; run Combat
+instead if you want the damage numbers. Its window is titled `DeHulud Combat`, so you can tell the two apart, and
+the permission box at the top of this page applies unchanged.
+
+```
+python3 dehulud_combat.py    # needs dehulud.py in the same folder
+./dehulud-combat             # the Rust binary (chmod +x dehulud-combat once, as for dehulud)
+```
+
+Its window has up to three sections: the worm meter, **Damage taken** and **Damage dealt**. Its top row is a
+header row with one switch per section:
+
+```
+[x] Worm  [x] Taken  [x] Dealt
+```
+
+One click on a label switches that section on or off. A switched-off section disappears, the window shrinks to
+fit, and Combat does no reads for it. With all three off only the header row is left, so you can switch one back
+on.
+
+Combat has its own config file, `$XDG_CONFIG_HOME/dehulud-combat/config.json` (normally
+`~/.config/dehulud-combat/config.json`), separate from plain DeHulud's. The switches are in it as `worm`,
+`damage_taken` and `damage_dealt`: booleans, all `true` (on) by default. The flags `--no-worm`, `--no-taken` and
+`--no-dealt` switch a section off for that run only: they override the config file and are not saved. A click on
+a label, on the other hand, is saved to the config file, so the section stays as you left it; a section switched
+off only by a flag keeps its saved value until you click its label. Text mode (`--text`) shows only the worm
+meter, so it refuses `--no-worm` (`--no-taken` and `--no-dealt` are accepted there and change nothing); started
+with `--launch`, the game still starts, just without the meter. All of this is the same for `dehulud_combat.py`
+and the `dehulud-combat` binary.
+
+As with the worm meter, a failed check shows `-` for that section, never `0`, and never another character's
+value, and a game build Combat does not know shows `Unsupported game version` for all three sections. The damage
+numbers need game build 26333948 or later: on the older supported builds the worm meter works as before and both
+damage sections show `-`.
+
+**Damage taken** shows your own character's health drops. Combat reads your current health about four times a
+second (once per poll) and shows each drop since the last poll as a red `-N`, rounded to whole points; a drop
+that rounds to `0` shows nothing. The newest number is on top, at most 4 are visible, and each fades after about
+a second. **Limits:** two hits within one poll merge into one number. Healing in the same poll hides part or all
+of a hit. The number is a net health drop, not the weapon's damage.
+
+**Damage dealt** shows health and shield lost by the enemies you fight, in two columns: **HEALTH** in amber and
+**SHIELD** in pale teal, without a minus sign. Each column shows up to 4 numbers, the newest at the bottom, each
+fading after about a second. Hits within the same poll merge into one number. Tracked are the enemy you are
+aiming at, your melee soft-lock target, and the last 4 distinct enemies you aimed at, each kept for 18 seconds
+after you last aimed at it. Only characters count. **Limits:** other players' hits on the same enemy count too.
+Healing or regeneration hides damage. A killing blow shows at most the health that was left. Only aimed,
+soft-locked and recently aimed enemies are tracked. Vehicles show nothing.
+
 ## Per-distribution notes
 
 The sysctl commands from the box at the top are the same everywhere (`/etc/sysctl.d/` is read at boot by
@@ -270,6 +325,9 @@ sandbox may block the read). The one live check so far used the native (non-Flat
 the end of this page).
 
 ## Read-only and no network: what DeHulud does and does not do
+
+DeHulud Combat follows the same rules (read-only and no network) and reads health and shield for its damage
+sections the same way; the read counts below are for the worm meter.
 
 - It reads `/proc/<pid>/cmdline`, `/proc/<pid>/maps` and `/proc/<pid>/status` of processes that belong to
   you, `/proc/sys/kernel/yama/ptrace_scope`, `/etc/os-release` (only to name the tkinter package) and its
@@ -320,12 +378,13 @@ the game member it reads.
 
 DeHulud does not change the game, but reading another program's memory may still be against the game's
 terms of service, and anti-cheat software may treat it as suspicious. Nobody can promise that it is safe
-for your account. **Use at your own risk.**
+for your account. This applies to DeHulud Combat in the same way. **Use at your own risk.**
 
 ## Uninstall
 
 1. Delete `dehulud.py` and/or the Rust binary `dehulud`, and the config folder `~/.config/dehulud` (or
-   `$XDG_CONFIG_HOME/dehulud`).
+   `$XDG_CONFIG_HOME/dehulud`). For DeHulud Combat also delete `dehulud_combat.py` and/or the `dehulud-combat`
+   binary, and the config folder `~/.config/dehulud-combat` (or `$XDG_CONFIG_HOME/dehulud-combat`).
 2. Remove the Steam launch option if you added one (Steam > Dune: Awakening > Properties > General >
    Launch Options: delete the line).
 3. If you changed the ptrace setting, put back what was there before:
